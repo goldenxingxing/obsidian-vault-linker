@@ -4,6 +4,7 @@
 
 import { DEFAULT_MOC_FOLDER, textsFor, type DomainRule, type Settings } from "./settings.ts";
 import { fillTemplate, wikilink } from "./text.ts";
+import { pySort } from "./pycompat.ts";
 
 /**
  * 把配置里的名字压成**单层**文件名：配置可以被用户手改，也可以从别人分享的
@@ -101,10 +102,43 @@ export function buildMoc(
     "",
   ];
 
-  for (const rel of rels) lines.push(entryLine(wikilink(rel, titles.get(rel)), rel, summaries, s));
-  lines.push("");
+  // 直接放在领域文件夹里的笔记在前，子文件夹各成一节（更深的层级归到所在的一级子文件夹）
+  const groups = new Map<string, string[]>();
+  for (const rel of rels) {
+    const g = subfolderOf(rel, domain);
+    const list = groups.get(g);
+    if (list) list.push(rel);
+    else groups.set(g, [rel]);
+  }
+  const line = (rel: string): string => entryLine(wikilink(rel, titles.get(rel)), rel, summaries, s);
+  for (const rel of groups.get("") ?? []) lines.push(line(rel));
+  if (groups.has("")) lines.push("");
+  for (const g of pySort([...groups.keys()].filter((k) => k !== ""))) {
+    lines.push("## " + g, "");
+    for (const rel of groups.get(g) as string[]) lines.push(line(rel));
+    lines.push("");
+  }
+  if (groups.size === 0) lines.push("");
 
   return lines.join("\n");
+}
+
+/**
+ * 笔记在索引页里归到哪个小节：领域文件夹下的一级子文件夹名；直接在领域文件夹里则为 ""。
+ * 兜底领域（没有文件夹）按笔记所在的顶层文件夹分；通配规则匹配到的不分节。
+ */
+export function subfolderOf(rel: string, domain: DomainRule): string {
+  for (const p of domain.paths) {
+    if (/[*?]/.test(p)) continue;
+    const base = p.replace(/\/+$/, "");
+    if (!rel.startsWith(base + "/")) continue;
+    const rest = rel.slice(base.length + 1);
+    const i = rest.indexOf("/");
+    return i > 0 ? rest.slice(0, i) : "";
+  }
+  if (domain.paths.length > 0) return "";
+  const i = rel.indexOf("/");
+  return i > 0 ? rel.slice(0, i) : "";
 }
 
 export function buildHome(domainCounts: ReadonlyMap<string, number>, today: string, s: Settings): string {

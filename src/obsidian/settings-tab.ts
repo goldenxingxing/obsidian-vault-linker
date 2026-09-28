@@ -9,7 +9,7 @@
 
 import { App, Notice, PluginSettingTab, Setting } from "obsidian";
 import type VaultLinkerPlugin from "./main.ts";
-import { defaultSettings, mergeSettings, type Settings } from "../core/settings.ts";
+import { defaultSettings, mergeSettings, upgradeBuiltins, type Settings } from "../core/settings.ts";
 import { migrateAutoAccepted } from "../core/config-text.ts";
 import { JsonConfigModal } from "./report-modal.ts";
 import { EntityWizardModal } from "./wizard-modal.ts";
@@ -229,6 +229,7 @@ export class LinkerSettingTab extends PluginSettingTab {
               // 少一整段配置，浅合并会让 s.trigger / s.moc 等直接变 undefined
               const next = mergeSettings(defaultSettings(), obj);
               migrateAutoAccepted(next);
+              upgradeBuiltins(next);
               this.plugin.settings = next;
               void this.saveNow().then(() => {
                 this.display();

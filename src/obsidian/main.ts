@@ -6,9 +6,8 @@ import { setUiLocale, t } from "./i18n.ts";
 import { MarkdownView, Notice, Plugin, type TAbstractFile } from "obsidian";
 import { obsidianLocale } from "./locale.ts";
 import {
-  applyAutoTexts, defaultSettings, mergeSettings, todayIso, type Settings,
+  applyAutoTexts, defaultSettings, mergeSettings, todayIso, upgradeBuiltins, type Settings,
 } from "../core/settings.ts";
-import { ensureDomains } from "../core/scope.ts";
 import { migrateAutoAccepted } from "../core/config-text.ts";
 import type { PlanOutput } from "../core/engine.ts";
 import { applyPlanObsidian, effectiveSettings, formatReport, planVault, type ApplyOutcome } from "./runner.ts";
@@ -113,8 +112,9 @@ export default class VaultLinkerPlugin extends Plugin {
     this.settings = mergeSettings(defaultSettings(), data);
     // 首次安装：language: auto → 按 Obsidian 的语言选文案，并落盘（下次加载不再是“首次”）
     if (this.firstRun) applyAutoTexts(this.settings, obsidianLocale());
-    // 旧版向导采纳的词挪进设置页上看得见的词表
-    const migrated = migrateAutoAccepted(this.settings);
+    // 旧版向导采纳的词挪进设置页上看得见的词表；没改过的旧版内置文案换成新版的
+    const movedTerms = migrateAutoAccepted(this.settings);
+    const migrated = upgradeBuiltins(this.settings) || movedTerms;
     if (this.firstRun || migrated) await this.saveData(this.settings);
   }
 
@@ -193,11 +193,8 @@ export default class VaultLinkerPlugin extends Plugin {
     }
     this.busy = true;
     try {
-      // domains 为空（默认）→ 每轮都按当前的顶层文件夹生成领域，只用于本轮、不写回配置：
-      // 新建的顶层文件夹自动有自己的索引页，用户什么都不用配。
-      // 用生效配置探测，模板目录不会变成领域；浅拷贝，免得改到 this.settings
-      const s = { ...(await effectiveSettings(this.app, this.settings)) };
-      ensureDomains(s, this.app.vault.getFiles().map((f) => f.path));
+      // 生效配置排除了模板目录；领域为空时 planVault 按顶层文件夹自动生成（模板目录不会变成领域）
+      const s = await effectiveSettings(this.app, this.settings);
       const plan = await planVault(this.app, s, todayIso());
       this.lastPlan = plan;
       let outcome: ApplyOutcome | undefined;

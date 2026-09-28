@@ -18,13 +18,13 @@ import { cleanAlias, summaryOf, titleOf, wikilink } from "../src/core/text.ts";
 import { collectInScope, ensureDomains, globMatch, templatePaths, withRuntimeExcludes } from "../src/core/scope.ts";
 import { withOriginalEol } from "../src/core/text.ts";
 import { applyPlan } from "../src/node/apply.ts";
-import { mkdtempSync, readFileSync as readF, writeFileSync as writeF } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync as readF, writeFileSync as writeF } from "node:fs";
 import { tmpdir } from "node:os";
 import { join as pjoin } from "node:path";
 import { classify } from "../src/core/classify.ts";
 import { planRun, type PlanOutput } from "../src/core/engine.ts";
 import {
-  defaultSettings, mergeSettings, retargetTexts, applyAutoTexts, textsFor, type Settings,
+  defaultSettings, mergeSettings, retargetTexts, applyAutoTexts, textsFor, newDomain, upgradeBuiltins, type Settings,
 } from "../src/core/settings.ts";
 import { homePath, isForeignMoc, mocPath, safeDirPath, safeFileName } from "../src/core/moc.ts";
 import { domainsToText, entitiesToText, textToDomains, textToEntities } from "../src/core/config-text.ts";
@@ -230,8 +230,8 @@ test("引擎端到端：生成 MOC + 互链，且二次运行 0 修改（幂等�
   // 正文原样保留在开头，不补 frontmatter
   assert.ok(first.files["eng/a.md"].startsWith(files["eng/a.md"]));
   // MOC 里按领域分组
-  assert.match(first.moc.get("_moc/工程.md") as string, /# MOC：工程/);
-  assert.match(first.moc.get("_moc/00-主页.md") as string, /在范围文档总数：3 篇/);
+  assert.match(first.moc.get("_moc/工程.md") as string, /^# 工程$/m);
+  assert.match(first.moc.get("_moc/00-主页.md") as string, /在范围文档总数：3 篇/); // 样例配置自定义了这行
 
   const second = runOnce(first.files, first.moc, Q);
   assert.equal(second.out.report.plannedChanges, 0, "二次运行不应再有正文改动");
@@ -717,4 +717,115 @@ test("旧版向导词迁进自定义词表：去重、清空旧字段、匹配�
   assert.equal(s.entities.manual[1].wordBoundary, true);
   assert.equal(s.entities.manual[1].caseSensitive, false);
   assert.equal(migrateAutoAccepted(s), false);
+});
+
+// ---------------------------------------------------------------- 索引页：分节、跟随语言、清理
+
+test("索引页按子文件夹分节：直接在文件夹里的在前，更深的归到一级子文件夹", () => {
+  const s = defaultSettings();
+  s.domains = [newDomain("项目", ["项目"], [])];
+  const files = {
+    "项目/总览.md": "# 总览\n",
+    "项目/缓存/改造.md": "# 缓存改造\n",
+    "项目/缓存/深/细节.md": "# 细节\n",
+    "项目/搜索/v2.md": "# 搜索 v2\n",
+  };
+  const page = runOnce(files, new Map(), s).moc.get("_moc/项目.md") as string;
+  const body = page.slice(page.indexOf("# 项目"));
+  const order = ["总览", "## 搜索", "搜索 v2", "## 缓存", "缓存改造", "细节"].map((x) => body.indexOf(x));
+  assert.ok(order.every((i) => i >= 0), body);
+  assert.ok(body.indexOf("总览") < body.indexOf("## "), "直接在文件夹里的笔记排在小节前");
+  assert.ok(body.indexOf("缓存改造") > body.indexOf("## 缓存") && body.indexOf("细节") > body.indexOf("## 缓存"));
+  assert.ok(!body.includes("## 深"), "更深的层级不另起小节");
+});
+
+test("关掉索引页：相关笔记区块里不再链向不存在的索引页", () => {
+  const s = defaultSettings();
+  s.moc.enabled = false;
+  const r = runOnce({ "a/x.md": "# X\n\nAlpha\n", "a/y.md": "# Alpha\n" }, new Map(), s);
+  assert.ok(!r.files["a/x.md"].includes("_moc/"));
+  assert.equal(r.out.mocChanges.size, 0);
+});
+
+/** 和插件一样：没保存领域时，每轮按当前的顶层文件夹生成领域 */
+function autoRun(files: Record<string, string>, moc: Map<string, string>, s: Settings): ReturnType<typeof runOnce> {
+  const run = { ...s };
+  ensureDomains(run, Object.keys(files));
+  return runOnce(files, moc, run);
+}
+
+test("文件夹删了：它的旧索引页（本插件生成的）列入清理，别人的文件不碰", () => {
+  const s = defaultSettings();
+  const first = autoRun({ "旧/a.md": "# A\n", "新/b.md": "# B\n" }, new Map(), s);
+  assert.ok(first.moc.has("_moc/旧.md"));
+  const moc = new Map(first.moc);
+  moc.set("_moc/我的笔记.md", "# 我自己写的\n");
+  const second = autoRun({ "新/b.md": "# B\n" }, moc, s);
+  assert.deepEqual([...second.out.mocRemovals.keys()], ["_moc/旧.md"]);
+  assert.deepEqual(second.out.report.mocStale, ["_moc/旧.md"]);
+  // 关掉索引页时一个都不删
+  const off = { ...s, moc: { ...s.moc, enabled: false } };
+  assert.equal(autoRun({ "新/b.md": "# B\n" }, moc, off).out.mocRemovals.size, 0);
+});
+
+test("Node 写盘：旧索引页移进 .trash/，计划后被改过的不动", () => {
+  const s = defaultSettings();
+  const dir = mkdtempSync(pjoin(tmpdir(), "vl-stale-"));
+  const first = autoRun({ "旧/a.md": "# A\n", "新/b.md": "# B\n" }, new Map(), s);
+  const page = first.moc.get("_moc/旧.md") as string;
+  mkdirSync(pjoin(dir, "_moc"), { recursive: true });
+  mkdirSync(pjoin(dir, "新"), { recursive: true });
+  writeF(pjoin(dir, "_moc/旧.md"), page);
+  writeF(pjoin(dir, "新/b.md"), "# B\n");
+  const plan = autoRun({ "新/b.md": "# B\n" }, first.moc, s).out;
+  const r = applyPlan(dir, plan, s);
+  assert.deepEqual(r.removedMoc, ["_moc/旧.md"]);
+  assert.equal(existsSync(pjoin(dir, "_moc/旧.md")), false);
+  assert.equal(readF(pjoin(dir, ".trash/_moc/旧.md"), "utf8"), page);
+
+  // 计划之后有人改了这页 → 不删
+  writeF(pjoin(dir, "_moc/旧.md"), page + "我加的一行\n");
+  assert.deepEqual(applyPlan(dir, plan, s).removedMoc, []);
+  assert.equal(existsSync(pjoin(dir, "_moc/旧.md")), true);
+});
+
+test("旧版内置文案与文件名：没改过的升级到新版（语言不变），改过的保留", () => {
+  const zh = defaultSettings();
+  zh.texts = textsFor("zh");
+  zh.texts.mocTitlePrefix = "# MOC：";
+  zh.texts.relatedHeading = "## 相关文档";
+  zh.fallbackDomain.name = "Unsorted";
+  zh.moc.homeFile = "Home";
+  assert.equal(upgradeBuiltins(zh), true);
+  assert.equal(zh.texts.mocTitlePrefix, "# ");
+  assert.equal(zh.texts.relatedHeading, "## 相关笔记");
+  assert.equal(zh.fallbackDomain.name, "其他笔记");
+  assert.equal(zh.moc.homeFile, "主页");
+  assert.equal(upgradeBuiltins(zh), false, "第二次没有可升级的");
+
+  const en = defaultSettings();
+  en.texts.homeSectionTitle = "## Domains";
+  en.fallbackDomain.name = "Unsorted";
+  upgradeBuiltins(en);
+  assert.equal(en.texts.homeSectionTitle, "## Folders");
+  assert.equal(en.fallbackDomain.name, "Other notes");
+  assert.equal(en.moc.homeFile, "Home");
+
+  const custom = defaultSettings();
+  custom.texts.mocTitlePrefix = "# 索引 · ";
+  custom.fallbackDomain.name = "杂项";
+  custom.moc.homeFile = "00-首页";
+  upgradeBuiltins(custom);
+  assert.equal(custom.texts.mocTitlePrefix, "# 索引 · ");
+  assert.equal(custom.fallbackDomain.name, "杂项");
+  assert.equal(custom.moc.homeFile, "00-首页");
+});
+
+test("首次安装的中文用户：索引页文件名也是中文", () => {
+  const s = defaultSettings();
+  applyAutoTexts(s, "zh-cn");
+  assert.equal(s.fallbackDomain.name, "其他笔记");
+  assert.equal(s.moc.homeFile, "主页");
+  const r = runOnce({ "a.md": "# A\n" }, new Map(), s);
+  assert.ok(r.moc.has("_moc/主页.md") && r.moc.has("_moc/其他笔记.md"));
 });

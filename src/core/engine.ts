@@ -54,6 +54,8 @@ export interface RunReport {
   mocPlanned: number;
   /** 目标路径被非本插件文件占用、因而**未写入**的 MOC（保护用户自己的同名文件） */
   mocConflicts: string[];
+  /** 本插件以前生成、这次不再生成的索引页（文件夹删了或改名了）：移到回收站 */
+  mocStale: string[];
   autoLinkTotal: number;
   warnings: string[];
   unmappedFiles: string[];
@@ -73,6 +75,8 @@ export interface PlanOutput {
   domains: Map<string, string>;
   changedDocs: string[];
   mocChanges: Map<string, { old: string | null; new: string }>;
+  /** 要移到回收站的旧索引页 → 计划时的内容（执行前据此确认没被改过） */
+  mocRemovals: Map<string, string>;
   /** 待写入：正文变更 + MOC 变更 */
   writes: Map<string, string>;
   /** 写前原文（仅正文） */
@@ -176,7 +180,8 @@ function* planSteps(input: EngineInput): Generator<void, PlanOutput, void> {
     if (!s.related.enabled) return out;
     const dom = domainById.get(domains.get(rel) as string) as DomainRule;
     let body = s.texts.relatedHeading + "\n\n";
-    body += fillTemplate(s.texts.relatedNavLine, { link: wikilink(mocPath(dom, s)) }) + "\n";
+    // 关掉索引页时不链过去：那一页不会生成，链接会失效
+    if (s.moc.enabled) body += fillTemplate(s.texts.relatedNavLine, { link: wikilink(mocPath(dom, s)) }) + "\n";
     for (const t of autolinks.get(rel) as string[]) {
       body += fillTemplate(s.texts.relatedEntryLine, { link: wikilink(t, titles.get(t)) }) + "\n";
     }
@@ -230,6 +235,12 @@ function* planSteps(input: EngineInput): Generator<void, PlanOutput, void> {
   }
   if (s.moc.enabled) putMoc(homePath(s), buildHome(domainCounts, input.today, s));
 
+  // 以前生成、这次不再生成的索引页：只认本插件生成的（isForeignMoc 判为自己的），别人的文件不碰。
+  // 关掉索引页时一个都不删——那是「别再更新」，不是「全删掉」
+  const mocStale = s.moc.enabled
+    ? pySort([...prevMoc.keys()].filter((p) => !mocFiles.has(p) && !isForeignMoc(p, prevMoc, s)))
+    : [];
+
   const mocChanges = new Map<string, { old: string | null; new: string }>();
   for (const [mp, mc] of mocFiles) {
     const old = prevMoc.get(mp) ?? null;
@@ -278,6 +289,7 @@ function* planSteps(input: EngineInput): Generator<void, PlanOutput, void> {
     plannedChanges: changedDocs.length,
     mocPlanned: mocChanges.size,
     mocConflicts,
+    mocStale,
     autoLinkTotal,
     warnings,
     unmappedFiles,
@@ -295,6 +307,7 @@ function* planSteps(input: EngineInput): Generator<void, PlanOutput, void> {
     domains,
     changedDocs,
     mocChanges,
+    mocRemovals: new Map(mocStale.map((p) => [p, prevMoc.get(p) as string])),
     writes,
     originals,
     newContents,

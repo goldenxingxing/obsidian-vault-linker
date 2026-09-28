@@ -15,7 +15,7 @@
 import { t } from "./i18n.ts";
 import type { App, TFile } from "obsidian";
 import { planRunAsync, type EngineInput, type PlanOutput } from "../core/engine.ts";
-import { collectInScope, templatePaths, withRuntimeExcludes } from "../core/scope.ts";
+import { collectInScope, ensureDomains, templatePaths, withRuntimeExcludes } from "../core/scope.ts";
 import { safeDirPath } from "../core/moc.ts";
 import { pyUniversalNewlines } from "../core/pycompat.ts";
 import { protectionOk } from "../core/verify.ts";
@@ -31,19 +31,24 @@ export interface VaultLike {
   configDir?: string;
   getFiles(): Array<{ path: string; stat?: { mtime: number; size: number } }>;
   getAbstractFileByPath(path: string): unknown;
+  readBinary(file: never): Promise<ArrayBuffer>;
   process(file: never, fn: (data: string) => string): Promise<string>;
-  modify(file: never, data: string): Promise<void>;
   create(path: string, data: string): Promise<unknown>;
   createFolder(path: string): Promise<unknown>;
+  /** 只用来读配置目录里的 JSON（模板设置）：配置目录不在 vault 索引里，Vault API 读不到 */
   adapter: {
-    readBinary(path: string): Promise<ArrayBuffer>;
     exists(path: string): Promise<boolean>;
     read(path: string): Promise<string>;
   };
 }
 
 export interface AppLike {
-  vault: VaultLike;
+  vault: VaultLike & {
+    /** 旧版 API：system=true 进系统回收站，false 进 vault 的 .trash */
+    trash?(file: never, system: boolean): Promise<void>;
+  };
+  /** 1.6.6+：按用户在「文件与链接」里选的方式删除（系统回收站 / .trash / 直接删） */
+  fileManager?: { trashFile?(file: never): Promise<void> };
 }
 
 /** 鸭子类型判断"是不是一个文件"（不依赖 instanceof TFile，避免运行时依赖 obsidian） */
@@ -62,6 +67,8 @@ export interface ApplyOutcome {
   skippedOpen: string[];
   /** 写入失败的 MOC（路径被文件夹占用，或 Obsidian 拒绝写入） */
   mocFailed: string[];
+  /** 移到回收站的旧索引页 */
+  mocRemoved: string[];
   /** 引擎自己写过的路径（含 MOC）——监听层用它区分“外部改动”，避免白跑 */
   writtenPaths: string[];
   skipped: string[];
@@ -70,10 +77,15 @@ export interface ApplyOutcome {
   restored: string[];
 }
 
-/** 读文本：非法 UTF-8 返回 null */
+/**
+ * 读文本：不存在或非法 UTF-8 返回 null。
+ * 读字节再严格解码，而不是 vault.read：非 UTF-8 的文件要跳过，不能被「宽松解码」后写回、弄坏原字节。
+ */
 export async function readVaultText(app: AppLike, path: string): Promise<string | null> {
+  const file = app.vault.getAbstractFileByPath(path);
+  if (!isFileLike(file)) return null;
   try {
-    const buf = await app.vault.adapter.readBinary(path);
+    const buf = await app.vault.readBinary(file as never);
     const dec = new TextDecoder("utf-8", { fatal: true });
     return pyUniversalNewlines(dec.decode(new Uint8Array(buf)));
   } catch {
@@ -128,8 +140,14 @@ export async function effectiveSettings(app: AppLike, s: Settings): Promise<Sett
   return withRuntimeExcludes(s, templatePaths((p) => files.get(p) ?? null, configDir));
 }
 
+/**
+ * 算一轮计划。没有保存领域（默认）时，按当前的顶层文件夹生成领域，只用于这一轮、不写回配置：
+ * 新建的文件夹自动有索引页，删掉的文件夹下一轮就不再有（旧索引页随之清理）。
+ */
 export async function planVault(app: AppLike, s: Settings, today: string): Promise<PlanOutput> {
-  return planRunAsync(await buildEngineInput(app, s, today));
+  const run = { ...s };
+  ensureDomains(run, app.vault.getFiles().map((f) => f.path));
+  return planRunAsync(await buildEngineInput(app, run, today));
 }
 
 /** 为 E4 候选发现准备文档集（标题 / tags / 正文） */
@@ -154,7 +172,7 @@ export async function buildDiscoverDocs(app: AppLike, s: Settings): Promise<Disc
 async function writeVaultFile(app: AppLike, path: string, content: string): Promise<boolean> {
   const existing = app.vault.getAbstractFileByPath(path);
   if (isFileLike(existing)) {
-    await app.vault.modify(existing as never, content);
+    await app.vault.process(existing as never, () => content);
     return true;
   }
   // 路径被文件夹（或其它非文件对象）占着：不能 create，否则会抛错
@@ -179,6 +197,7 @@ export async function applyPlanObsidian(
     written: 0,
     writtenMoc: 0,
     mocFailed: [],
+    mocRemoved: [],
     writtenPaths: [],
     skipped: [],
     protectionFailed: [],
@@ -245,6 +264,21 @@ export async function applyPlanObsidian(
     out.writtenMoc++;
     out.writtenPaths.push(mp);
   }
+
+  // 不再生成的旧索引页：计划之后被人改过（或已不在）就不动
+  for (const [mp, planned] of plan.mocRemovals) {
+    const file = app.vault.getAbstractFileByPath(mp);
+    if (!isFileLike(file) || (await readVaultText(app, mp)) !== planned) continue;
+    try {
+      if (app.fileManager?.trashFile) await app.fileManager.trashFile(file as never);
+      else if (app.vault.trash) await app.vault.trash(file as never, true);
+      else continue;
+    } catch {
+      continue;
+    }
+    out.mocRemoved.push(mp);
+    out.writtenPaths.push(mp);
+  }
   return out;
 }
 
@@ -258,6 +292,10 @@ export function formatReport(plan: PlanOutput, s: Settings, mode: "dry-run" | "a
   lines.push(t("领域分布: ", "Areas: ") + r.domains.map((d) => `${d.name}=${d.count}`).join(", "));
   lines.push(t(`计划修改文档: ${r.plannedChanges} / ${r.scanned}`, `Notes to update: ${r.plannedChanges} / ${r.scanned}`));
   lines.push(t(`MOC 新建/更新: ${r.mocPlanned}`, `Index pages to write: ${r.mocPlanned}`));
+  if (r.mocStale.length > 0) {
+    lines.push(t(`不再需要的旧索引页（移到回收站）: ${r.mocStale.length}: `, `Old index pages no longer needed (moved to trash): ${r.mocStale.length}: `) +
+      r.mocStale.slice(0, 10).join(", "));
+  }
   if (r.mocConflicts.length > 0) {
     lines.push(t(`!! 跳过同名文件 ${r.mocConflicts.length} 个（位置已有不是本插件生成的文件，或只差大小写，未覆盖）: `,
       `!! ${r.mocConflicts.length} index pages skipped (a file not made by this plugin, or differing only in case, is already there): `) +

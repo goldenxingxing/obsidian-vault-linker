@@ -4,17 +4,19 @@
  * "预览之后是否被外部改动"比对的是**内容**，不是 (mtime, size)：只动了时间戳的文件照常写入。
  */
 
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import type { PlanOutput } from "../core/engine.ts";
 import type { Settings } from "../core/settings.ts";
 import { protectionOk } from "../core/verify.ts";
-import { readFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, renameSync } from "node:fs";
 import { withOriginalEol } from "../core/text.ts";
 import { readTextOrNull, writeTextAtomic } from "./vaultFs.ts";
 
 export interface ApplyResult {
   written: string[];
   writtenMoc: string[];
+  /** 移进 vault 的 .trash/ 的旧索引页（和 Obsidian「移到 .trash 文件夹」一样） */
+  removedMoc: string[];
   skippedChanged: string[];
   protectionFailed: string[];
   protectionExternal: string[];
@@ -29,6 +31,7 @@ export function applyPlan(
   const res: ApplyResult = {
     written: [],
     writtenMoc: [],
+    removedMoc: [],
     skippedChanged: [],
     protectionFailed: [],
     protectionExternal: [],
@@ -59,6 +62,16 @@ export function applyPlan(
   for (const [mp, ch] of plan.mocChanges) {
     writeTextAtomic(join(vaultRoot, mp), ch.new);
     res.writtenMoc.push(mp);
+  }
+
+  // ---- 不再生成的旧索引页：计划之后被改过就不动
+  for (const [mp, planned] of plan.mocRemovals) {
+    if (readTextOrNull(join(vaultRoot, mp)) !== planned) continue;
+    let dst = join(vaultRoot, ".trash", mp);
+    for (let i = 2; existsSync(dst); i++) dst = join(vaultRoot, ".trash", mp.replace(/\.md$/, ` ${i}.md`));
+    mkdirSync(dirname(dst), { recursive: true });
+    renameSync(join(vaultRoot, mp), dst);
+    res.removedMoc.push(mp);
   }
 
   // ---- 写后保护校验（剥离托管区块后应与原文逐字节一致）

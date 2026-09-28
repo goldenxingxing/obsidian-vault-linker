@@ -33,7 +33,8 @@ class FakeVault {
   /** process 调用次数（用于验证"跳过"语义） */
   processCalls = 0;
 
-  async readBinary(path: string): Promise<ArrayBuffer> {
+  async readBinary(file: { path: string }): Promise<ArrayBuffer> {
+    const path = file.path;
     const c = this.files.get(path);
     if (c === undefined) throw new Error("ENOENT " + path);
     const enc = new TextEncoder().encode(c);
@@ -62,13 +63,16 @@ class FakeVault {
     return next;
   }
 
-  async modify(file: { path: string }, data: string): Promise<void> {
-    this.files.set(file.path, data);
-  }
-
   async create(path: string, data: string): Promise<unknown> {
     this.files.set(path, data);
     return { path };
+  }
+
+  trashed: string[] = [];
+
+  async trash(file: { path: string }, _system: boolean): Promise<void> {
+    this.files.delete(file.path);
+    this.trashed.push(file.path);
   }
 
   async createFolder(path: string): Promise<unknown> {
@@ -77,10 +81,8 @@ class FakeVault {
   }
 
   adapter = {
-    readBinary: (p: string) => this.readBinary(p),
     exists: async (p: string) => this.files.has(p) || this.dirs.has(p),
     read: async (p: string) => this.files.get(p) ?? "",
-    getBasePath: () => "/fake-vault",
   };
 }
 
@@ -193,9 +195,9 @@ test("非 UTF-8 文件被跳过", async () => {
   const { app, vault } = makeApp({ "eng/a.md": "# A\n\nAPI\n" });
   // 造一个非法 UTF-8 的 md
   const bad = new Uint8Array([0xff, 0xfe, 0x41]);
-  (vault as unknown as { readBinary: (p: string) => Promise<ArrayBuffer> }).readBinary = async (p: string) => {
-    if (p === "eng/bad.md") return bad.buffer;
-    const enc = new TextEncoder().encode(vault.files.get(p) as string);
+  (vault as unknown as { readBinary: (f: { path: string }) => Promise<ArrayBuffer> }).readBinary = async (f) => {
+    if (f.path === "eng/bad.md") return bad.buffer;
+    const enc = new TextEncoder().encode(vault.files.get(f.path) as string);
     return enc.buffer;
   };
   vault.files.set("eng/bad.md", "placeholder");
@@ -373,4 +375,34 @@ test("ChangeWatcher：「跳过的文件夹」里的改动不进快照", () => {
   const snap = watcher.snapshot();
   assert.equal(snap.has("eng/a.md"), true);
   assert.equal(snap.has("Archive/old/b.md"), false);
+});
+
+test("文件夹删了：它的旧索引页移到回收站；有 fileManager.trashFile 时优先用它", async () => {
+  const { app, vault } = makeApp({ "旧/a.md": "# A\n", "新/b.md": "# B\n" });
+  const s = defaultSettings();
+  await applyPlanObsidian(app, await planVault(app, s, TODAY), s);
+  assert.ok(vault.files.has("_moc/旧.md"));
+  vault.files.set("_moc/我的.md", "# 我自己写的\n"); // 不是插件生成的，不能删
+
+  vault.files.delete("旧/a.md");
+  const plan = await planVault(app, s, TODAY);
+  const out = await applyPlanObsidian(app, plan, s);
+  assert.deepEqual(out.mocRemoved, ["_moc/旧.md"]);
+  assert.deepEqual(vault.trashed, ["_moc/旧.md"]);
+  assert.ok(vault.files.has("_moc/我的.md"));
+  assert.match(formatReport(plan, s, "apply", out), /不再需要的旧索引页/);
+
+  // 新版 Obsidian：走 fileManager.trashFile（尊重用户的删除偏好）
+  const used: string[] = [];
+  const app2 = makeApp({ "旧/a.md": "# A\n" });
+  await applyPlanObsidian(app2.app, await planVault(app2.app, s, TODAY), s);
+  app2.vault.files.delete("旧/a.md");
+  app2.vault.files.set("新/b.md", "# B\n");
+  const withFm = {
+    ...app2.app,
+    fileManager: { trashFile: async (f: { path: string }) => { used.push(f.path); app2.vault.files.delete(f.path); } },
+  };
+  await applyPlanObsidian(withFm, await planVault(withFm, s, TODAY), s);
+  assert.deepEqual(used, ["_moc/旧.md"]);
+  assert.deepEqual(app2.vault.trashed, []);
 });

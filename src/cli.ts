@@ -98,7 +98,7 @@ export function runCli(args: Args): { plan: PlanOutput; applied: ReturnType<type
   if (applied && !args.quiet) {
     console.log(
       `APPLY 完成：写入正文 ${applied.written.length} 篇（跳过快照后变更 ${applied.skippedChanged.length} 篇），` +
-      `写入 MOC ${applied.writtenMoc.length} 个。`,
+      `写入 MOC ${applied.writtenMoc.length} 个，旧索引页移入 .trash ${applied.removedMoc.length} 个。`,
     );
     if (applied.skippedChanged.length > 0) {
       console.log("!! 跳过（写前内容已变）：" + applied.skippedChanged.slice(0, 20).join(", "));
