@@ -22,6 +22,25 @@ const SAVE_DEBOUNCE_MS = 400;
 
 const list = (v: string): string[] => v.split(",").map((x) => x.trim().replace(/^\/+|\/+$/g, "")).filter(Boolean);
 
+/** 「停下来多久后更新」的选项（秒） */
+const WAIT_CHOICES = [30, 60, 300, 900, 1800, 3600];
+
+function waitLabel(sec: number): string {
+  if (sec < 60) return t(`${sec} 秒`, `${sec} seconds`);
+  const min = Math.round(sec / 60);
+  if (min < 60) return t(`${min} 分钟`, min === 1 ? "1 minute" : `${min} minutes`);
+  const h = Math.round((min / 60) * 10) / 10;
+  return t(`${h} 小时`, h === 1 ? "1 hour" : `${h} hours`);
+}
+
+/**
+ * 按等待时间定检查间隔：检查只比对文件的修改时间和大小、不读内容，很便宜，
+ * 但也没必要比等待时间密太多。取等待时间的 1/3，限定在 10–60 秒。
+ */
+function pollFor(quietSec: number): number {
+  return Math.min(60, Math.max(10, Math.round(quietSec / 3)));
+}
+
 export class LinkerSettingTab extends PluginSettingTab {
   private plugin: VaultLinkerPlugin;
   private saveTimer: number | null = null;
@@ -86,17 +105,37 @@ export class LinkerSettingTab extends PluginSettingTab {
         }),
       );
 
+    const autoOn = this.s.trigger.onFileChange && this.s.trigger.autoApply;
     new Setting(containerEl)
       .setName(t("自动更新", "Update automatically"))
-      .setDesc(t("笔记有改动、停下来半分钟后自动更新链接。正在编辑的笔记等你关掉后再更新。",
-        "Updates links about half a minute after your notes stop changing. The note you are editing is updated after you close it."))
+      .setDesc(t("笔记改完、停下来一段时间后自动更新链接。正在编辑的笔记等你关掉后再更新。",
+        "Updates links once your notes have stopped changing for a while. The note you are editing is updated after you close it."))
       .addToggle((c) =>
-        c.setValue(this.s.trigger.onFileChange && this.s.trigger.autoApply).onChange((v) => {
+        c.setValue(autoOn).onChange((v) => {
           this.s.trigger.onFileChange = v;
           this.s.trigger.autoApply = v;
+          wait.settingEl.toggle(v);
           this.save();
         }),
       );
+    const wait = new Setting(containerEl)
+      .setName(t("停下来多久后更新", "Wait after the last change"))
+      .setDesc(t("这段时间里没有新的改动才更新。写得多、vault 大，可以设长一些。",
+        "Links are updated only after this long without new changes. Choose longer for large vaults or long writing sessions."))
+      .addDropdown((d) => {
+        const quiet = this.s.trigger.quietPeriodSec;
+        for (const sec of WAIT_CHOICES) d.addOption(String(sec), waitLabel(sec));
+        // 导入的配置或旧版本可能是别的值：原样显示，不悄悄改掉
+        if (!WAIT_CHOICES.includes(quiet)) d.addOption(String(quiet), waitLabel(quiet));
+        d.setValue(String(quiet));
+        d.onChange((v) => {
+          const sec = Number(v);
+          this.s.trigger.quietPeriodSec = sec;
+          this.s.trigger.pollIntervalSec = pollFor(sec);
+          this.save();
+        });
+      });
+    wait.settingEl.toggle(autoOn);
 
     new Setting(containerEl)
       .setName(t("每篇笔记的相关链接数", "Related links per note"))

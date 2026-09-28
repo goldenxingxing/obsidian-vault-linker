@@ -91,10 +91,11 @@ After you enable it, the plugin **changes nothing on its own**.
 1. Open **Settings → Vault Linker**.
 2. Click **Preview** to see what it would change; nothing is written.
 3. If you like the result, click **Update links**.
-4. To keep links up to date as you write, turn on **Update automatically**.
+4. To keep links up to date as you write, turn on **Update automatically**, and choose how long to wait after
+   your last change (30 seconds to 1 hour).
 
-That is all the setup there is. The settings page has six items: run now, update automatically, related links
-per note, index pages, folders to skip, and optional topic terms. Each top-level folder gets its own index page,
+That is all the setup there is. The settings page has seven items: run now, update automatically, how long to wait, related
+links per note, index pages, folders to skip, and optional topic terms. Each top-level folder gets its own index page,
 including folders you create later. Finer options (scoring, generated text, timing) have sensible
 defaults and live in the settings JSON: **Export**, edit, **Import**.
 
