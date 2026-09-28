@@ -1,7 +1,7 @@
 /**
  * runner.ts — Obsidian 适配层：读 vault → 跑核心引擎 → 写回 vault
  *
- * 与 Node 侧（src/node/*）职责相同，只是 IO 换成 Obsidian API：
+ * 与 Node 侧（tools/cli/*）职责相同，只是 IO 换成 Obsidian API：
  *   - 读：vault.adapter.readBinary + fatal UTF-8 解码 + 通用换行归一
  *   - 写：vault.process（原子读改写，防并发覆盖）
  *   - 写后：protectionOk 校验，必要时回滚

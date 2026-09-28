@@ -167,8 +167,8 @@ a topic. On large vaults with automatic runs, a longer quiet period in the setti
 A command-line version runs the same engine without Obsidian:
 
 ```bash
-node src/cli.ts --vault <vault> --config <vault>/.obsidian/plugins/vault-linker-auto/data.json          # preview
-node src/cli.ts --vault <vault> --config <vault>/.obsidian/plugins/vault-linker-auto/data.json --apply  # write
+node tools/cli/cli.ts --vault <vault> --config <vault>/.obsidian/plugins/vault-linker-auto/data.json          # preview
+node tools/cli/cli.ts --vault <vault> --config <vault>/.obsidian/plugins/vault-linker-auto/data.json --apply  # write
 ```
 
 ## Settings you can share

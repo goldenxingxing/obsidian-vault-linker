@@ -17,7 +17,7 @@ import {
 import { cleanAlias, summaryOf, titleOf, wikilink } from "../src/core/text.ts";
 import { collectInScope, ensureDomains, globMatch, templatePaths, withRuntimeExcludes } from "../src/core/scope.ts";
 import { withOriginalEol } from "../src/core/text.ts";
-import { applyPlan } from "../src/node/apply.ts";
+import { applyPlan } from "../tools/cli/apply.ts";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync as readF, writeFileSync as writeF } from "node:fs";
 import { tmpdir } from "node:os";
 import { join as pjoin } from "node:path";

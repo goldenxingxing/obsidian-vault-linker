@@ -5,11 +5,11 @@
  */
 
 import { dirname, join } from "node:path";
-import type { PlanOutput } from "../core/engine.ts";
-import type { Settings } from "../core/settings.ts";
-import { protectionOk } from "../core/verify.ts";
+import type { PlanOutput } from "../../src/core/engine.ts";
+import type { Settings } from "../../src/core/settings.ts";
+import { protectionOk } from "../../src/core/verify.ts";
 import { existsSync, mkdirSync, readFileSync, renameSync } from "node:fs";
-import { withOriginalEol } from "../core/text.ts";
+import { withOriginalEol } from "../../src/core/text.ts";
 import { readTextOrNull, writeTextAtomic } from "./vaultFs.ts";
 
 export interface ApplyResult {

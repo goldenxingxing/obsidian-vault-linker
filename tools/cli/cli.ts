@@ -3,19 +3,19 @@
  * cli.ts — Node CLI：Obsidian 没开时的兜底，与插件用同一个引擎
  *
  * 用法：
- *   node src/cli.ts --vault <vault路径> [--preset generic | --config <data.json>] [--apply]
+ *   node tools/cli/cli.ts --vault <vault路径> [--preset generic | --config <data.json>] [--apply]
  *                   [--today YYYY-MM-DD] [--report-json <文件>] [--quiet]
  * --config 可以直接用插件保存的配置：<vault>/.obsidian/plugins/vault-linker-auto/data.json
  */
 
 import { join, resolve } from "node:path";
 import { readFileSync, writeFileSync } from "node:fs";
-import { planFromFiles, type PlanOutput } from "./core/engine.ts";
-import { PRESETS, applyAutoTexts, defaultSettings, mergeSettings, todayIso, type Settings } from "./core/settings.ts";
-import { ensureDomains, templatePaths, withRuntimeExcludes } from "./core/scope.ts";
-import { safeDirPath } from "./core/moc.ts";
-import { listAllFiles, readTextOrNull } from "./node/vaultFs.ts";
-import { applyPlan } from "./node/apply.ts";
+import { planFromFiles, type PlanOutput } from "../../src/core/engine.ts";
+import { PRESETS, applyAutoTexts, defaultSettings, mergeSettings, todayIso, type Settings } from "../../src/core/settings.ts";
+import { ensureDomains, templatePaths, withRuntimeExcludes } from "../../src/core/scope.ts";
+import { safeDirPath } from "../../src/core/moc.ts";
+import { listAllFiles, readTextOrNull } from "./vaultFs.ts";
+import { applyPlan } from "./apply.ts";
 
 interface Args {
   vault: string;
@@ -34,7 +34,7 @@ function parseArgs(argv: readonly string[]): Args {
   };
   const vault = get("--vault");
   if (!vault) {
-    console.error("用法: node src/cli.ts --vault <vault路径> [--preset generic | --config <data.json>] [--apply] [--today YYYY-MM-DD]");
+    console.error("用法: node tools/cli/cli.ts --vault <vault路径> [--preset generic | --config <data.json>] [--apply] [--today YYYY-MM-DD]");
     process.exit(2);
   }
   return {

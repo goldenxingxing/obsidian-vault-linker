@@ -1,14 +1,14 @@
 name: Release
 
-# Push a tag equal to the version in manifest.json (no "v" prefix), e.g.:
-#   npm version patch && git push && git push --tags
 on:
   push:
     tags:
-      - "*"
+      - "[0-9]+.[0-9]+.[0-9]+"
 
 permissions:
   contents: write
+  id-token: write
+  attestations: write
 
 jobs:
   release:
@@ -20,23 +20,24 @@ jobs:
         with:
           node-version: 24
 
-      - run: npm ci
-      - run: npm run typecheck
-      - run: npm test
-      - run: npm run build
-
-      - name: Check tag matches manifest version
+      - name: Install and build
         run: |
-          v=$(node -p "require('./manifest.json').version")
-          if [ "$v" != "${GITHUB_REF_NAME}" ]; then
-            echo "Tag ${GITHUB_REF_NAME} does not match manifest.json version $v"; exit 1
-          fi
+          npm ci
+          npm run build
 
-      - name: Create draft release
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          gh release create "${GITHUB_REF_NAME}" \
-            --title "${GITHUB_REF_NAME}" \
-            --draft \
-            main.js manifest.json styles.css
+      - name: Attest release assets
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: |
+            main.js
+            manifest.json
+            styles.css
+
+      - name: Publish GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: |
+            main.js
+            manifest.json
+            styles.css

@@ -12,7 +12,7 @@ import {
   statSync, existsSync, rmSync, cpSync, type Dirent,
 } from "node:fs";
 import { join, dirname, relative, sep } from "node:path";
-import { pyUniversalNewlines } from "../core/pycompat.ts";
+import { pyUniversalNewlines } from "../../src/core/pycompat.ts";
 
 /** 递归列出 vault 内全部文件（相对路径，POSIX 分隔符），跳过 .git */
 export function listAllFiles(vaultRoot: string): string[] {

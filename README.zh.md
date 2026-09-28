@@ -155,8 +155,8 @@ Vault Linker 在笔记之上维护一层「链接」：给 vault 的每个领域
 同一个引擎也能在 Obsidian 之外用命令行运行：
 
 ```bash
-node src/cli.ts --vault <vault> --config <vault>/.obsidian/plugins/vault-linker-auto/data.json          # 预览
-node src/cli.ts --vault <vault> --config <vault>/.obsidian/plugins/vault-linker-auto/data.json --apply  # 写入
+node tools/cli/cli.ts --vault <vault> --config <vault>/.obsidian/plugins/vault-linker-auto/data.json          # 预览
+node tools/cli/cli.ts --vault <vault> --config <vault>/.obsidian/plugins/vault-linker-auto/data.json --apply  # 写入
 ```
 
 ## 配置可以分享
