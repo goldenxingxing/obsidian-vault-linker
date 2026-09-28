@@ -18,7 +18,7 @@ at any time.
 - **Works with zero configuration.** Top-level folders become areas; note titles, aliases and tags become the
   topics used to find related notes. Names that say nothing about a note's topic (`README`, `index`, dates)
   are ignored automatically.
-- **Finds your own vocabulary.** The entity wizard mines candidate terms from your vault, English or Chinese,
+- **Finds your own vocabulary.** **Find in my notes** mines candidate terms from your vault, English or Chinese,
   without a dictionary, and you pick the ones to use.
 - **Catches changes Obsidian misses.** Files written by scripts, sync tools or AI agents don't always raise
   Obsidian's file events, so changes are also detected by polling.
@@ -73,7 +73,7 @@ The plugin is not in the community plugin list yet.
 
 **From a release**
 
-1. Download `main.js` and `manifest.json` from the
+1. Download `main.js`, `manifest.json` and `styles.css` from the
    [latest release](https://github.com/goldenxingxing/obsidian-vault-linker/releases/latest).
 2. Put both in `<your vault>/.obsidian/plugins/vault-linker/`. (`.obsidian` is a hidden folder; in the macOS
    Finder press `⌘ ⇧ .` to show it.)
@@ -82,17 +82,21 @@ The plugin is not in the community plugin list yet.
 **With BRAT** (updates automatically): install the [BRAT](https://github.com/TfTHacker/obsidian42-brat) plugin,
 choose **Add beta plugin**, and enter `goldenxingxing/obsidian-vault-linker`.
 
-**From source**: `npm install && npm run build`, then copy `main.js` and `manifest.json` as above.
+**From source**: `npm install && npm run build`, then copy `main.js`, `manifest.json` and `styles.css` as above.
 
 ## Getting started
 
 After you enable it, the plugin **changes nothing on its own**.
 
 1. Open **Settings → Vault Linker**.
-2. Click **Preview** to see what it would change; nothing is written. If you haven't set up areas yet, the first
-   run creates one for each top-level folder that contains notes.
-3. If you like the result, click **Apply**.
-4. To keep links up to date as you write, turn on **Watch for changes** and **Apply on automatic runs**.
+2. Click **Preview** to see what it would change; nothing is written.
+3. If you like the result, click **Update links**.
+4. To keep links up to date as you write, turn on **Update automatically**.
+
+That is all the setup there is. The settings page has six items: run now, update automatically, related links
+per note, index pages, folders to skip, and optional topic terms. Each top-level folder gets its own index page,
+including folders you create later. Finer options (scoring, generated text, timing) have sensible
+defaults and live in the settings JSON: **Export**, edit, **Import**.
 
 The report after each run lists what changed, what was skipped and why. Every run is also appended to
 `.obsidian/plugins/vault-linker/vault-linker.log`.
@@ -101,7 +105,7 @@ The report after each run lists what changed, what was skipped and why. Every ru
 
 Every write goes through these checks:
 
-- **Preview first.** Nothing is written until you click Apply or turn on automatic writing.
+- **Preview first.** Nothing is written until you click Update links or turn on Update automatically.
 - **Skip if changed.** A note that changed after the preview is left alone.
 - **Verify, then roll back.** After writing, the note with its blocks removed must match the original byte for
   byte; if not, the original bytes are restored.
@@ -114,18 +118,18 @@ Every write goes through these checks:
 - **Keep formatting.** Windows (CRLF) line endings are kept. A note that begins with a `---` rule gets a `***`
   separator instead, so the plugin never turns your text into frontmatter by accident.
 
-## Entity sources
+## Topics
 
-"Entities" are the topics used to find related notes. No domain vocabulary is built in; you combine sources:
+Topics are what the plugin uses to find related notes. No vocabulary is built in; these sources are combined:
 
 | Source | What it is | Default |
 |---|---|---|
-| E1 Titles and aliases | Each note's title and `aliases` | On |
-| E2 Tags | Tags you already use | On |
-| E3 Custom terms | Your own list, with aliases and weights | Empty |
-| E4 Candidate wizard | Terms mined from your vault that you tick to add | On demand |
+| Note titles and aliases | Each note's title and `aliases` | Always |
+| Tags | Tags you already use | Always |
+| Topic terms | Your own list, one per line, with optional aliases | Empty |
+| Find in my notes | Terms mined from your vault; the ones you tick are added to your topic terms | On demand |
 
-The wizard splits long identifiers into words and, for Chinese text, scores 2–4 character sequences by how
+**Find in my notes** splits long identifiers into words and, for Chinese text, scores 2–4 character sequences by how
 tightly they stick together and how varied their neighbors are, so it finds real terms without a dictionary.
 On a 762-note Chinese vault, 39 of 41 hand-picked domain terms appeared among the candidates. It shows a
 searchable list rather than a top-N, because rare terms rank low but still matter.
@@ -147,10 +151,10 @@ a topic. On large vaults with automatic runs, a longer quiet period in the setti
 
 | Command | What it does |
 |---|---|
-| Preview (writes nothing) | Report only |
-| Run now (writes to the vault) | Writes, verifies, rolls back on failure |
+| Preview (changes nothing) | Report only |
+| Update links now | Writes, verifies, rolls back on failure |
 | Show last run report | The last report in a dialog, copyable |
-| Entity candidate wizard | Finds candidate terms in your vault |
+| Find terms in your notes | Finds candidate terms in your vault |
 
 A command-line version runs the same engine without Obsidian:
 
@@ -161,7 +165,7 @@ node src/cli.ts --vault <vault> --config <vault>/.obsidian/plugins/vault-linker/
 
 ## Settings you can share
 
-**Settings → Import / export** turns your whole configuration, including areas and term lists, into JSON that
+**Settings → Import / export settings** turns your whole configuration, including areas and term lists, into JSON that
 someone else can import.
 
 ## Limits
@@ -178,7 +182,7 @@ someone else can import.
 ```bash
 npm install
 npm run typecheck
-npm test            # 65 tests, run directly by Node
+npm test            # run directly by Node (22.18+)
 npm run build       # main.js
 ```
 
@@ -188,6 +192,17 @@ npm run build       # main.js
   read → plan → write → verify → roll back path against an in-memory vault.
 - Modules imported directly by `node --test` use only erasable TypeScript syntax (no `enum`, `namespace` or
   parameter properties).
+
+### Releasing
+
+```bash
+npm version patch   # bumps package.json, manifest.json and versions.json, and tags the commit
+git push && git push --tags
+```
+
+The tag triggers `.github/workflows/release.yml`, which tests, builds and creates a draft GitHub release with
+`main.js`, `manifest.json` and `styles.css`. Review and publish the draft. The tag must equal the version, with no
+`v` prefix (`.npmrc` sets `tag-version-prefix=""`).
 
 ## License
 

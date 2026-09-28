@@ -7,7 +7,7 @@
  */
 
 import { isLatinTerm } from "./entities.ts";
-import type { DomainRule, EntityRule } from "./settings.ts";
+import type { DomainRule, EntityRule, Settings } from "./settings.ts";
 
 /** 领域列表 → 文本：`id | 显示名 | 路径(逗号) | 根关键词 | 根前缀 | 优先级`
  *
@@ -92,14 +92,30 @@ export function textToEntities(text: string): EntityRule[] {
     const term = (termPart ?? "").trim();
     if (!term) continue;
     const aliases = (aliasPart ?? "").split(",").map((x) => x.trim()).filter(Boolean);
-    const latin = isLatinTerm(term);
-    out.push({
-      term,
-      aliases,
-      caseSensitive: !latin,
-      wordBoundary: latin,
-      weight: 1,
-    });
+    out.push(termRule(term, aliases));
   }
   return out;
+}
+
+/**
+ * 旧版把向导采纳的词存在 autoAccepted 里，设置页上看不到也删不掉。
+ * 现在统一放进自定义词表（打分完全相同：权重 1、无别名、按词形推导匹配方式）。
+ * 返回是否迁移了东西。
+ */
+export function migrateAutoAccepted(s: Settings): boolean {
+  if (s.entities.autoAccepted.length === 0) return false;
+  const have = new Set(s.entities.manual.map((r) => r.term));
+  for (const term of s.entities.autoAccepted) {
+    if (have.has(term)) continue;
+    have.add(term);
+    s.entities.manual.push(termRule(term));
+  }
+  s.entities.autoAccepted = [];
+  return true;
+}
+
+/** 一条自定义词：拉丁词忽略大小写并按整词匹配，中文等不加边界 */
+export function termRule(term: string, aliases: string[] = []): EntityRule {
+  const latin = isLatinTerm(term);
+  return { term, aliases, caseSensitive: !latin, wordBoundary: latin, weight: 1 };
 }

@@ -1,0 +1,41 @@
+/* Vault Linker */
+
+.vault-linker-note {
+  margin: 0.25em 0 0.75em;
+}
+
+.vault-linker-report {
+  white-space: pre-wrap;
+  max-height: 60vh;
+  overflow: auto;
+  user-select: text;
+}
+
+.vault-linker-json {
+  width: 100%;
+  height: 40vh;
+  font-family: var(--font-monospace);
+}
+
+.vault-linker-candidates {
+  max-height: 50vh;
+  overflow: auto;
+  border-top: 1px solid var(--background-modifier-border);
+}
+
+.vault-linker-candidate {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  padding: 2px 4px;
+  cursor: pointer;
+}
+
+.vault-linker-candidate-term {
+  font-weight: var(--font-semibold);
+}
+
+.vault-linker-candidate-meta {
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+}

@@ -82,7 +82,6 @@ export function runCli(args: Args): { plan: PlanOutput; applied: ReturnType<type
     (rel) => readTextOrNull(join(args.vault, rel)),
     s,
     args.today,
-    args.vault,
     mocContents,
   );
 
@@ -129,10 +128,7 @@ function printReport(plan: PlanOutput, s: Settings, applyMode: boolean): void {
   if (r.mocConflicts.length > 0) {
     console.log(`!! 跳过 ${r.mocConflicts.length} 个同名文件（位置已有不是本插件生成的文件，或只差大小写，未覆盖）: ${r.mocConflicts.slice(0, 10).join(", ")}`);
   }
-  console.log(`补 frontmatter tags: ${r.fmAdded}`);
   console.log(`自动互链总数: ${r.autoLinkTotal}（${s.related.blockTag} 条目）`);
-  console.log(`日报解析: ${r.dailyParsed} 篇；产出引用存在 ${r.deliverablesExisting} 条 / 缺失 ${r.deliverablesMissing} 条`);
-  console.log(`日报↔产出双向链对: ${r.sourceLinkPairs}（出处注入 ${r.sourceLinkDocs} 篇产出文件）`);
   console.log(`实体总数: ${r.entityUsage.length}（未命中 ${r.unusedEntities.length}，过泛 ${r.tooBroadEntities.length}）`);
   for (const w of [...new Set(r.warnings)].sort()) console.log("WARNING: " + w);
   console.log(`链接有效性: 托管区块/MOC 内失效链接 ${r.brokenManaged.length} 个；正文既有失效链接 ${r.brokenPreexist.length} 个`);

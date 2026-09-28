@@ -34,12 +34,11 @@ export interface VaultLike {
   process(file: never, fn: (data: string) => string): Promise<string>;
   modify(file: never, data: string): Promise<void>;
   create(path: string, data: string): Promise<unknown>;
+  createFolder(path: string): Promise<unknown>;
   adapter: {
     readBinary(path: string): Promise<ArrayBuffer>;
     exists(path: string): Promise<boolean>;
-    mkdir(path: string): Promise<void>;
     read(path: string): Promise<string>;
-    write(path: string, data: string): Promise<void>;
   };
 }
 
@@ -69,11 +68,6 @@ export interface ApplyOutcome {
   protectionFailed: string[];
   protectionExternal: string[];
   restored: string[];
-}
-
-export function vaultBasePath(app: AppLike): string | undefined {
-  const a = app.vault.adapter as unknown as { getBasePath?: () => string };
-  return typeof a.getBasePath === "function" ? a.getBasePath() : undefined;
 }
 
 /** 读文本：非法 UTF-8 返回 null */
@@ -114,7 +108,6 @@ export async function buildEngineInput(app: AppLike, s: Settings, today: string)
     contents,
     skippedBinary,
     excludedCount,
-    vaultAbsPath: vaultBasePath(app),
     mocContents,
   };
 }
@@ -167,7 +160,7 @@ async function writeVaultFile(app: AppLike, path: string, content: string): Prom
   // 路径被文件夹（或其它非文件对象）占着：不能 create，否则会抛错
   if (existing !== null && existing !== undefined) return false;
   const dir = path.split("/").slice(0, -1).join("/");
-  if (dir && !(await app.vault.adapter.exists(dir))) await app.vault.adapter.mkdir(dir);
+  if (dir && !app.vault.getAbstractFileByPath(dir)) await app.vault.createFolder(dir);
   await app.vault.create(path, content);
   return true;
 }
@@ -226,7 +219,7 @@ export async function applyPlanObsidian(
 
     if (s.safety.verifyStrippedBytes) {
       const now = await readVaultText(app, rel);
-      if (now !== null && !protectionOk(orig, now, plan.domains.get(rel) as string, s)) {
+      if (now !== null && !protectionOk(orig, now, s)) {
         if (now !== target) {
           out.protectionExternal.push(rel);
         } else {
@@ -262,7 +255,7 @@ export function formatReport(plan: PlanOutput, s: Settings, mode: "dry-run" | "a
   lines.push(t("模式: ", "Mode: ") + (mode === "apply" ? "APPLY" : "DRY-RUN"));
   lines.push(t(`扫描 .md: ${r.scanned} 在范围 + ${r.excluded} 排除`, `Notes: ${r.scanned} in scope, ${r.excluded} excluded`) +
     (r.skippedBinary ? t(`（非 UTF-8 跳过 ${r.skippedBinary}）`, ` (${r.skippedBinary} skipped: not UTF-8)`) : ""));
-  lines.push(t("领域分布: ", "Domains: ") + r.domains.map((d) => `${d.name}=${d.count}`).join(", "));
+  lines.push(t("领域分布: ", "Areas: ") + r.domains.map((d) => `${d.name}=${d.count}`).join(", "));
   lines.push(t(`计划修改文档: ${r.plannedChanges} / ${r.scanned}`, `Notes to update: ${r.plannedChanges} / ${r.scanned}`));
   lines.push(t(`MOC 新建/更新: ${r.mocPlanned}`, `Index pages to write: ${r.mocPlanned}`));
   if (r.mocConflicts.length > 0) {
@@ -270,21 +263,14 @@ export function formatReport(plan: PlanOutput, s: Settings, mode: "dry-run" | "a
       `!! ${r.mocConflicts.length} index pages skipped (a file not made by this plugin, or differing only in case, is already there): `) +
       r.mocConflicts.slice(0, 10).join(", "));
   }
-  lines.push(t(`补 frontmatter tags: ${r.fmAdded}`, `Domain tags to add: ${r.fmAdded}`));
   lines.push(t(`自动互链条目: ${r.autoLinkTotal}`, `Related-note links: ${r.autoLinkTotal}`));
-  if (s.daily.enabled) {
-    lines.push(t(`日报解析: ${r.dailyParsed} 篇；产出引用存在 ${r.deliverablesExisting} / 缺失 ${r.deliverablesMissing}`,
-      `Daily reports: ${r.dailyParsed}; deliverables found ${r.deliverablesExisting} / missing ${r.deliverablesMissing}`));
-    lines.push(t(`日报↔产出链对: ${r.sourceLinkPairs}（出处注入 ${r.sourceLinkDocs} 篇）`,
-      `Report ↔ deliverable links: ${r.sourceLinkPairs} (source line in ${r.sourceLinkDocs} notes)`));
-  }
   lines.push(t(`实体: ${r.entityUsage.length} 个（未命中 ${r.unusedEntities.length}，过泛 ${r.tooBroadEntities.length}）`,
-    `Entities: ${r.entityUsage.length} (${r.unusedEntities.length} unused, ${r.tooBroadEntities.length} too broad)`));
+    `Topics: ${r.entityUsage.length} (${r.unusedEntities.length} unused, ${r.tooBroadEntities.length} too broad)`));
   lines.push(t(`链接有效性: 托管区块/MOC 内失效 ${r.brokenManaged.length}；正文既有失效 ${r.brokenPreexist.length}`,
     `Broken links: ${r.brokenManaged.length} in generated blocks and index pages; ${r.brokenPreexist.length} already in your notes`));
   if (r.unmappedFiles.length > 0) {
     lines.push(t(`未映射目录文件: ${r.unmappedFiles.length}（已归入「${s.fallbackDomain.name}」，可在设置里补目录映射）`,
-      `Notes in no domain: ${r.unmappedFiles.length} (put in "${s.fallbackDomain.name}"; add folders to a domain in settings)`));
+      `Notes in no area: ${r.unmappedFiles.length} (listed under "${s.fallbackDomain.name}"; add their folders to an area in settings)`));
   }
   if (outcome) {
     lines.push(t(`写入正文 ${outcome.written} 篇（跳过 ${outcome.skipped.length} 篇：写前内容已变）`,

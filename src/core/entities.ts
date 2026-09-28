@@ -28,6 +28,9 @@ export interface EntityMatcher {
   sample?: string;
 }
 
+/** 旧版「领域标签」功能写进 frontmatter 的 tag 前缀（功能已移除，笔记里可能还有） */
+const LEGACY_DOMAIN_TAG = "domain/";
+
 /**
  * lookbehind 只在 iOS 16.4+ 才支持（官方移动端指南明确提到这点），
  * 老版本 iOS 上 `new RegExp("(?<!x)")` 会直接抛异常。
@@ -127,12 +130,11 @@ export function buildEntityMatchers(s: Settings, docs: readonly EntitySourceDoc[
   for (const term of s.entities.autoAccepted) add(term, 1, "auto");
 
   // E2 vault 内 tag（用户自己维护的主题词，质量最高）。
-  // 本插件自己写的领域 tag（domain/…）不算：否则 domain 会被读回来当实体
-  const ownTag = s.frontmatter.tagPrefix;
+  // 旧版本插件补过的领域 tag（domain/…）不算：几乎每篇都有，只会是噪音
   if (s.entities.fromTags) {
     for (const doc of docs) {
       for (const tag of doc.tags) {
-        if (ownTag !== "" && tag.startsWith(ownTag)) continue;
+        if (tag.startsWith(LEGACY_DOMAIN_TAG)) continue;
         const t = s.entities.tagMode === "top" ? tag.split("/")[0] : tag;
         add(t, 1, "tag");
       }

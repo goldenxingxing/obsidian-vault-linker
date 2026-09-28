@@ -14,6 +14,7 @@ import { App, Modal, Notice, Setting } from "obsidian";
 import type VaultLinkerPlugin from "./main.ts";
 import { discoverCandidatesAsync, type Candidate } from "../core/discover.ts";
 import { buildDiscoverDocs, effectiveSettings } from "./runner.ts";
+import { termRule } from "../core/config-text.ts";
 
 export class EntityWizardModal extends Modal {
   private candidates: Candidate[] | null = null;
@@ -23,23 +24,25 @@ export class EntityWizardModal extends Modal {
   private statusEl: HTMLElement | null = null;
   private scanning = false;
   private readonly plugin: VaultLinkerPlugin;
+  /** 应用后回调（设置页用来刷新词表显示） */
+  private readonly onApplied: (() => void) | undefined;
 
-  constructor(app: App, plugin: VaultLinkerPlugin) {
+  constructor(app: App, plugin: VaultLinkerPlugin, onApplied?: () => void) {
     super(app);
     this.plugin = plugin;
+    this.onApplied = onApplied;
   }
 
   override onOpen(): void {
     const { contentEl } = this;
     contentEl.empty();
-    contentEl.createEl("h2", { text: t("实体候选向导", "Entity candidate wizard") });
+    this.titleEl.setText(t("从笔记里找主题词", "Find terms in your notes"));
     contentEl.createEl("p", {
       text: t(
-        "扫描全库，用词频 + 凝固度 + 邻接多样性挖出候选术语。勾选后点「应用到词表」才生效。" +
-        "大 vault（数千篇）首次扫描可能需要 1 分钟左右（分块处理，界面不会冻住，状态栏会显示进度）。",
-        "Scans the whole vault for candidate terms by frequency, cohesion and context variety. " +
-        "Nothing changes until you click Add to terms. A large vault (thousands of notes) can take about a minute; " +
-        "the scan runs in chunks, so Obsidian stays responsive."),
+        "从你的笔记里找出反复出现的术语（中英文都行）。勾选想用的，点「加入我的主题词」。" +
+        "几千篇的 vault 可能要扫一分钟左右，期间 Obsidian 照常可用。",
+        "Finds terms that recur across your notes, in English or Chinese. Tick the ones you want and click Add to my terms. " +
+        "A vault with thousands of notes can take about a minute; Obsidian stays usable meanwhile."),
     });
 
     this.statusEl = contentEl.createDiv();
@@ -73,13 +76,10 @@ export class EntityWizardModal extends Modal {
         }),
       );
 
-    this.listEl = contentEl.createDiv();
-    this.listEl.style.maxHeight = "50vh";
-    this.listEl.style.overflow = "auto";
-    this.listEl.style.borderTop = "1px solid var(--background-modifier-border)";
+    this.listEl = contentEl.createDiv({ cls: "vault-linker-candidates" });
 
     const footer = contentEl.createDiv({ cls: "modal-button-container" });
-    const applyBtn = footer.createEl("button", { text: t("应用到词表", "Add to terms") });
+    const applyBtn = footer.createEl("button", { cls: "mod-cta", text: t("加入我的主题词", "Add to my terms") });
     applyBtn.addEventListener("click", () => void this.apply());
     const closeBtn = footer.createEl("button", { text: t("关闭", "Close") });
     closeBtn.addEventListener("click", () => this.close());
@@ -137,21 +137,16 @@ export class EntityWizardModal extends Modal {
       return;
     }
     for (const c of items) {
-      const row = el.createDiv();
-      row.style.display = "flex";
-      row.style.gap = "8px";
-      row.style.alignItems = "baseline";
-      row.style.padding = "2px 4px";
+      const row = el.createEl("label", { cls: "vault-linker-candidate" });
       const cb = row.createEl("input", { type: "checkbox" });
       cb.checked = this.selected.has(c.term);
       cb.addEventListener("change", () => {
         if (cb.checked) this.selected.add(c.term);
         else this.selected.delete(c.term);
       });
-      const label = row.createEl("span");
-      label.setText(c.term);
-      label.style.fontWeight = "600";
-      const meta = row.createEl("span", {
+      row.createSpan({ cls: "vault-linker-candidate-term", text: c.term });
+      row.createSpan({
+        cls: "vault-linker-candidate-meta",
         text: `df=${c.df} freq=${c.freq}` +
           (c.kind === "cjk"
             ? t(` 凝聚=${c.cohesion.toFixed(1)} 熵=${c.entropy.toFixed(1)}`, ` cohesion=${c.cohesion.toFixed(1)} entropy=${c.entropy.toFixed(1)}`)
@@ -159,8 +154,6 @@ export class EntityWizardModal extends Modal {
           (c.inTitles ? t(` 标题×${c.inTitles}`, ` titles×${c.inTitles}`) : "") +
           (c.inTags ? ` tag×${c.inTags}` : ""),
       });
-      meta.style.opacity = "0.6";
-      meta.style.fontSize = "0.85em";
     }
     if (this.filtered().length > items.length) {
       el.createEl("p", { text: t(`（仅显示前 ${items.length} 个，请用搜索缩小范围）`, `(showing the first ${items.length}; search to narrow down)`) });
@@ -174,16 +167,17 @@ export class EntityWizardModal extends Modal {
     }
     const s = this.plugin.settings;
     const existing = new Set(s.entities.manual.map((r) => r.term));
-    const auto = new Set(s.entities.autoAccepted);
     let added = 0;
     for (const term of this.selected) {
-      if (existing.has(term) || auto.has(term)) continue;
-      auto.add(term);
+      if (existing.has(term)) continue;
+      existing.add(term);
+      s.entities.manual.push(termRule(term));
       added++;
     }
-    s.entities.autoAccepted = [...auto];
     await this.plugin.saveSettings();
-    new Notice(t(`已把 ${added} 个候选加入词表（原词表未改动）`, `Added ${added} terms (your custom list is unchanged)`));
+    this.onApplied?.();
+    new Notice(t(`已把 ${added} 个词加入「你的主题词」，可在设置里查看和删除`,
+      `Added ${added} terms to Your terms; you can review or remove them in settings`));
     this.close();
   }
 

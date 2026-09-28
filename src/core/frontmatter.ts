@@ -1,5 +1,5 @@
 /**
- * frontmatter.ts — frontmatter 检测 / 补 domain tag / opt-out / 出处区块插入
+ * frontmatter.ts — frontmatter 检测 / opt-out / tags 解析
  *
  */
 
@@ -44,30 +44,6 @@ export function isOptedOut(content: string, s: Settings): boolean {
   return re.test(m[0]);
 }
 
-/** 给完全没有 frontmatter 的文档补 tags */
-export function addTagsFrontmatter(content: string, slug: string, s: Settings): string {
-  return `---\ntags: [${s.frontmatter.tagPrefix}${slug}]\n---\n\n${content}`;
-}
-
-/** 空 frontmatter：`---` 紧跟 `---` */
-const EMPTY_FM = "---\n---\n";
-
-/**
- * 按配置给（已剥离托管区块的）正文补领域标签；引擎写入与写后保护校验共用这一个函数，
- * 两边算出的「期望内容」才不会分叉。
- *   - frontmatter.enabled 关 → 原样返回
- *   - 已有 frontmatter → 不动（不改用户已有的 frontmatter）
- *   - 空 frontmatter → 标签写进去，不另叠一个
- */
-export function withDomainTag(content: string, slug: string, s: Settings): string {
-  if (!s.frontmatter.enabled) return content;
-  if (content.startsWith(EMPTY_FM)) {
-    return `---\ntags: [${s.frontmatter.tagPrefix}${slug}]\n---\n${content.slice(EMPTY_FM.length)}`;
-  }
-  if (hasFrontmatter(content, s)) return content;
-  return addTagsFrontmatter(content, slug, s);
-}
-
 /**
  * 其他插件自己的数据文件（Excalidraw 画板、Kanban 看板）：它们按自己的格式解析整个文件，
  * 往里追加区块或补 frontmatter 可能让插件读坏它。
@@ -76,31 +52,6 @@ export function isPluginDataFile(rel: string, content: string): boolean {
   if (rel.endsWith(".excalidraw.md")) return true;
   const m = content.match(FM_RE);
   return m !== null && /^(?:excalidraw-plugin|kanban-plugin):/m.test(m[0]);
-}
-
-/**
- * 插入 SOURCE-LINK 区块：
- *   - 有 frontmatter -> 紧跟 frontmatter 之后
- *   - 否则 -> 首个标题行之后；再没有 -> 文件开头
- * 注意统一在前面多加一个 "\n"。
- */
-export function insertSourceLink(content: string, line: string, s: Settings): string {
-  const tag = s.daily.sourceBlockTag;
-  const block = `<!-- ${tag}:START -->\n${line}\n<!-- ${tag}:END -->\n`;
-  const fm = content.match(fmRe(s));
-  let pos: number;
-  if (fm) {
-    pos = fm[0].length;
-  } else {
-    const h = /^#{1,6}\s/m.exec(content);
-    if (h) {
-      const e = content.indexOf("\n", h.index);
-      pos = e === -1 ? content.length : e + 1;
-    } else {
-      return block + content; // 文件开头
-    }
-  }
-  return content.slice(0, pos) + "\n" + block + content.slice(pos);
 }
 
 // ---------------------------------------------------------------- tag 提取（供 E2 实体来源）

@@ -5,7 +5,7 @@ const prod = process.argv[2] === "production";
 
 const banner = `/*
 Vault Linker — Obsidian plugin (bundled, generated file — do not edit).
-Source: https://github.com/  (this repository). Built by esbuild from src/obsidian/main.ts.
+Source: https://github.com/goldenxingxing/obsidian-vault-linker
 */`;
 
 const context = await esbuild.context({
@@ -19,7 +19,7 @@ const context = await esbuild.context({
     "node:*",
   ],
   format: "cjs",
-  target: "es2022",
+  target: "es2018",
   logLevel: "info",
   sourcemap: prod ? false : "inline",
   treeShaking: true,

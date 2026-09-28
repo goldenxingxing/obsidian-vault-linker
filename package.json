@@ -1,7 +1,7 @@
 {
   "name": "obsidian-vault-linker",
   "version": "0.1.0",
-  "description": "Obsidian plugin: auto-generate MOC index pages, entity-based related-doc links, frontmatter domain tags, and daily-report traceability — with everything configurable.",
+  "description": "Build an index page for each area of your vault and a ranked list of related notes at the end of each note, in plain Markdown, without touching your own text.",
   "private": true,
   "type": "module",
   "license": "MIT",
@@ -10,7 +10,7 @@
     "build": "node esbuild.config.mjs production",
     "typecheck": "tsc --noEmit",
     "test": "node --test tests/",
-    "equivalence": "node tools/equivalence.ts"
+    "version": "node version-bump.mjs && git add manifest.json versions.json"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",

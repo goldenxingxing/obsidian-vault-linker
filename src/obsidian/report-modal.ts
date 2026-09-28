@@ -15,12 +15,9 @@ export class ReportModal extends Modal {
   override onOpen(): void {
     const { contentEl } = this;
     contentEl.empty();
-    contentEl.createEl("h2", { text: this.title });
-    const pre = contentEl.createEl("pre");
+    this.titleEl.setText(this.title);
+    const pre = contentEl.createEl("pre", { cls: "vault-linker-report" });
     pre.setText(this.body);
-    pre.style.whiteSpace = "pre-wrap";
-    pre.style.maxHeight = "60vh";
-    pre.style.overflow = "auto";
     new Setting(contentEl).addButton((b) =>
       b.setButtonText(t("复制", "Copy")).onClick(async () => {
         await navigator.clipboard.writeText(this.body);
@@ -55,17 +52,14 @@ export class JsonConfigModal extends Modal {
   override onOpen(): void {
     const { contentEl } = this;
     contentEl.empty();
-    contentEl.createEl("h2", { text: this.title });
+    this.titleEl.setText(this.title);
     contentEl.createEl("p", {
       text: this.onApply
         ? t("粘贴配置 JSON 后点「导入」。导入会覆盖当前设置。", "Paste settings JSON and click Import. This replaces your current settings.")
         : t("这是当前配置的 JSON，可复制保存或分享给别人（「分享码」即此文本）。", "Your current settings as JSON. Copy it to keep or share."),
     });
-    const ta = contentEl.createEl("textarea");
+    const ta = contentEl.createEl("textarea", { cls: "vault-linker-json" });
     ta.value = this.initial;
-    ta.style.width = "100%";
-    ta.style.height = "40vh";
-    ta.style.fontFamily = "monospace";
     const row = contentEl.createDiv({ cls: "modal-button-container" });
     if (this.onApply) {
       const btn = row.createEl("button", { text: t("导入", "Import") });

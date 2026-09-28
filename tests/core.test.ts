@@ -12,7 +12,7 @@ import {
 } from "../src/core/pycompat.ts";
 import { appendEndBlock, stripEndBlock } from "../src/core/blocks.ts";
 import {
-  addTagsFrontmatter, hasFrontmatter, insertSourceLink, isOptedOut, parseFrontmatterTags,
+  hasFrontmatter, isOptedOut, parseFrontmatterTags,
 } from "../src/core/frontmatter.ts";
 import { cleanAlias, summaryOf, titleOf, wikilink } from "../src/core/text.ts";
 import { collectInScope, ensureDomains, globMatch, templatePaths, withRuntimeExcludes } from "../src/core/scope.ts";
@@ -22,7 +22,6 @@ import { mkdtempSync, readFileSync as readF, writeFileSync as writeF } from "nod
 import { tmpdir } from "node:os";
 import { join as pjoin } from "node:path";
 import { classify } from "../src/core/classify.ts";
-import { normalizeCandidate } from "../src/core/daily.ts";
 import { planRun, type PlanOutput } from "../src/core/engine.ts";
 import {
   defaultSettings, mergeSettings, retargetTexts, applyAutoTexts, textsFor, type Settings,
@@ -123,26 +122,6 @@ test("hasFrontmatter / opt-out 只在 frontmatter 内生效", () => {
   assert.equal(isOptedOut("---\ntags: [a]\n---\nvault-linker: ignore\n", Q), false);
 });
 
-test("addTagsFrontmatter 字节形式", () => {
-  assert.equal(addTagsFrontmatter("正文", "research", Q), "---\ntags: [domain/research]\n---\n\n正文");
-});
-
-test("insertSourceLink 三种落点", () => {
-  const line = "> 📍 出处：x";
-  assert.equal(
-    insertSourceLink("---\ntags: [a]\n---\n正文\n", line, Q),
-    "---\ntags: [a]\n---\n\n<!-- SOURCE-LINK:START -->\n" + line + "\n<!-- SOURCE-LINK:END -->\n正文\n",
-  );
-  assert.equal(
-    insertSourceLink("# 标题\n正文\n", line, Q),
-    "# 标题\n\n<!-- SOURCE-LINK:START -->\n" + line + "\n<!-- SOURCE-LINK:END -->\n正文\n",
-  );
-  assert.equal(
-    insertSourceLink("正文无标题", line, Q),
-    "<!-- SOURCE-LINK:START -->\n" + line + "\n<!-- SOURCE-LINK:END -->\n正文无标题",
-  );
-});
-
 test("parseFrontmatterTags 支持行内与块序列", () => {
   assert.deepEqual(parseFrontmatterTags("---\ntags: [a, b]\n---\n").tags, ["a", "b"]);
   assert.deepEqual(parseFrontmatterTags("---\ntags:\n  - a\n  - b\n---\n").tags, ["a", "b"]);
@@ -172,7 +151,6 @@ test("cleanAlias / wikilink", () => {
   assert.equal(cleanAlias(" a|b[c]d "), "a/b c d");
   assert.equal(wikilink("a/b.md", "显示"), "[[a/b|显示]]");
   assert.equal(wikilink("a/b.md"), "[[a/b]]");
-  assert.equal(wikilink("a/b.py", undefined, true), "[[a/b.py]]");
 });
 
 // ---------------------------------------------------------------- scope / classify
@@ -204,24 +182,6 @@ test("classify：目录映射、reports 特例、根目录关键词", () => {
   assert.equal(classify("杂项.md", Q).domainId, "root-unsorted");
 });
 
-// ---------------------------------------------------------------- daily
-
-test("normalizeCandidate 的接受与拒绝", () => {
-  assert.equal(normalizeCandidate("`output/eng/a.md`", Q, "/V"), "eng/a.md");
-  assert.equal(normalizeCandidate("output/eng/a.md", Q, "/V"), "eng/a.md");
-  assert.equal(normalizeCandidate("/V/output/eng/a.md", Q, "/V"), "eng/a.md");
-  assert.equal(normalizeCandidate("/other/a.md", Q, "/V"), null);
-  assert.equal(normalizeCandidate("a.md", Q, "/V"), null); // 裸文件名
-  assert.equal(normalizeCandidate("output/../x.md", Q, "/V"), null);
-  assert.equal(normalizeCandidate("output/a.unknownext", Q, "/V"), null);
-  assert.equal(normalizeCandidate("`output/eng/a.py:123`", Q, "/V"), "eng/a.py");
-  // 尾标点先剥、反引号只剥一次，所以 "`...md`。" 剥完标点后仍以反引号结尾
-  // -> 扩展名变成 "md`" -> 被白名单拒掉（实践中不会出现：候选永远来自正则捕获，不含反引号）
-  assert.equal(normalizeCandidate("`output/eng/a.md`。", Q, "/V"), null);
-  assert.equal(normalizeCandidate("/V/output/eng/a.md", Q, "/V"), "eng/a.md");
-  assert.equal(normalizeCandidate("/V/output/eng/a.md", Q, "/OTHER"), null);
-});
-
 // ---------------------------------------------------------------- engine（端到端 + 幂等）
 
 function makeVault(files: Record<string, string>): { contents: Map<string, string>; allFiles: string[] } {
@@ -246,7 +206,6 @@ function runOnce(
     allFiles,
     contents,
     mocContents: moc,
-    vaultAbsPath: "/V",
   });
   // 注意：只把“正文变更”写回正文，MOC 单独维护（MOC 不在扫描范围内，不能混进 contents）
   const next = { ...files };
@@ -256,7 +215,7 @@ function runOnce(
   return { out, files: next, moc: nextMoc };
 }
 
-test("引擎端到端：生成 MOC + 互链 + 补 tags，且二次运行 0 修改（幂等）", () => {
+test("引擎端到端：生成 MOC + 互链，且二次运行 0 修改（幂等）", () => {
   const files: Record<string, string> = {
     "eng/a.md": "# A 文档\n\n关于 API 与缓存的说明。\n",
     "eng/b.md": "# B 文档\n\n同样讨论 API 与缓存。\n",
@@ -268,8 +227,8 @@ test("引擎端到端：生成 MOC + 互链 + 补 tags，且二次运行 0 修�
   assert.ok(first.out.report.autoLinkTotal > 0);
   // A 与 B 共享 API+缓存，应互链
   assert.match(first.files["eng/a.md"], /\[\[eng\/b\|B 文档\]\]/);
-  // 无 frontmatter 的文档补了 domain tag
-  assert.match(first.files["eng/a.md"], /^---\ntags: \[domain\/engineering\]\n---\n/);
+  // 正文原样保留在开头，不补 frontmatter
+  assert.ok(first.files["eng/a.md"].startsWith(files["eng/a.md"]));
   // MOC 里按领域分组
   assert.match(first.moc.get("_moc/工程.md") as string, /# MOC：工程/);
   assert.match(first.moc.get("_moc/00-主页.md") as string, /在范围文档总数：3 篇/);
@@ -297,11 +256,9 @@ test("边界：无尾换行 / 空文件 / 正文含 --- / BOM", () => {
   const first = runOnce(files, new Map(), Q);
   const second = runOnce(first.files, first.moc, Q);
   assert.equal(second.out.report.plannedChanges, 0);
-  // 空文件：先补 frontmatter，再追加托管区块（glue 为空串分支）
+  // 空文件：区块从第一行开始（glue 为空串分支），分隔线用 ***，不留一个没闭合的 ---
   const empty = first.files["eng/empty.md"] as string;
-  assert.equal(empty, "---\ntags: [domain/engineering]\n---\n\n\n---\n<!-- AUTO-LINKS:START -->\n" +
-    (empty.slice(empty.indexOf("<!-- AUTO-LINKS:START -->\n") + "<!-- AUTO-LINKS:START -->\n".length)));
-  assert.ok(empty.includes("<!-- AUTO-LINKS:START -->"));
+  assert.ok(empty.startsWith("***\n<!-- AUTO-LINKS:START -->\n"));
   assert.ok(empty.endsWith("<!-- AUTO-LINKS:END -->\n"));
   // BOM 保留在正文开头之后（不剥 BOM）
   assert.ok((first.files["eng/bom.md"] as string).includes("\uFEFF"));
@@ -474,8 +431,6 @@ test("通用默认：装完不监听、不自动写入，不带任何 vault 专�
   const d = defaultSettings();
   assert.equal(d.trigger.onFileChange, false);
   assert.equal(d.trigger.autoApply, false);
-  assert.deepEqual(d.daily.stripPathPrefixes, []);
-  assert.deepEqual(d.daily.barePathPrefixes, []);
 });
 
 test("用户自己的同名 MOC（也打了 moc 标签）不被覆盖；本插件生成的照常更新", () => {
@@ -484,7 +439,7 @@ test("用户自己的同名 MOC（也打了 moc 标签）不被覆盖；本插�
   const home = homePath(s);
   const one = (moc: Map<string, string>) => planRun({
     settings: s, today: TODAY, allFiles: ["a.md", ...moc.keys()],
-    contents: new Map([["a.md", "# A\n"]]), mocContents: moc, vaultAbsPath: "/V",
+    contents: new Map([["a.md", "# A\n"]]), mocContents: moc,
   });
   const out = one(new Map([[home, mine]]));
   assert.deepEqual(out.report.mocConflicts, [home]);
@@ -507,7 +462,6 @@ test("只差大小写的已有文件：跳过并报告，不去新建（macOS �
   const out = planRun({
     settings: s, today: TODAY, allFiles: ["notes/a.md", "_moc/Notes.md"],
     contents: new Map([["notes/a.md", "# A\n"]]), mocContents: new Map([["_moc/Notes.md", "old"]]),
-    vaultAbsPath: "/V",
   });
   assert.ok(out.report.mocConflicts.includes("_moc/notes.md"));
   assert.equal(out.mocChanges.has("_moc/notes.md"), false);
@@ -544,7 +498,6 @@ function genericRun(files: Record<string, string>, s: Settings, today = TODAY): 
     settings: s, today, allFiles: all,
     contents: new Map(inScope.map((r) => [r, files[r]])),
     mocContents: new Map(all.filter((f) => f.startsWith(safeDirPath(s.moc.folder) + "/")).map((f) => [f, files[f]])),
-    vaultAbsPath: "/V",
   });
 }
 
@@ -590,33 +543,24 @@ test("Excalidraw / Kanban 文件不写入、不参与互链", () => {
   assert.equal(p.report.excluded, 2);
 });
 
-test("空 frontmatter：标签写进去，而不是再叠一个", () => {
+test("旧版日报区块：下一次运行删掉，写后校验照常通过", () => {
   const s = defaultSettings();
-  s.frontmatter.enabled = true;
-  const files = { "a.md": "---\n---\n# A\n" };
-  const out = genericRun(files, s).newContents.get("a.md") as string;
-  assert.match(out, /^---\ntags: \[domain\/unsorted\]\n---\n# A\n/);
-});
-
-test("通用默认不补领域 tag；打开后补，且写后保护校验与引擎一致", () => {
-  const s = defaultSettings();
-  const off = genericRun({ "a.md": "# A\n" }, s).newContents.get("a.md") as string;
-  assert.ok(!off.startsWith("---\ntags"));
-  assert.equal(genericRun({ "a.md": "# A\n" }, s).report.fmAdded, 0);
-  // 走一遍 Node 写盘：保护校验必须 PASS（引擎和校验用同一个补标签函数）
-  for (const enabled of [false, true]) {
-    const t = { ...s, frontmatter: { ...s.frontmatter, enabled } };
-    const dir = mkdtempSync(pjoin(tmpdir(), "vl-fm-"));
-    writeF(pjoin(dir, "a.md"), "# A\n\nAlpha\n");
-    writeF(pjoin(dir, "b.md"), "---\n---\n# Alpha\n");
-    const p = planRun({
-      settings: t, today: TODAY, allFiles: ["a.md", "b.md"],
-      contents: new Map([["a.md", "# A\n\nAlpha\n"], ["b.md", "---\n---\n# Alpha\n"]]), vaultAbsPath: dir,
-    });
-    const r = applyPlan(dir, p, t);
-    assert.deepEqual(r.restored, [], `frontmatter.enabled=${enabled}`);
-    assert.deepEqual(r.protectionFailed, []);
-  }
+  const note = "# A\n\n<!-- SOURCE-LINK:START -->\n> 出处\n<!-- SOURCE-LINK:END -->\nAlpha\n\n" +
+    "---\n<!-- DELIVERABLES:START -->\n## 产出\n\n- [[x]]\n<!-- DELIVERABLES:END -->\n";
+  const dir = mkdtempSync(pjoin(tmpdir(), "vl-legacy-"));
+  writeF(pjoin(dir, "a.md"), note);
+  writeF(pjoin(dir, "b.md"), "# Alpha\n");
+  const p = planRun({
+    settings: s, today: TODAY, allFiles: ["a.md", "b.md"],
+    contents: new Map([["a.md", note], ["b.md", "# Alpha\n"]]),
+  });
+  const r = applyPlan(dir, p, s);
+  assert.deepEqual(r.restored, []);
+  assert.deepEqual(r.protectionFailed, []);
+  const out = readF(pjoin(dir, "a.md"), "utf8");
+  assert.ok(!out.includes("SOURCE-LINK") && !out.includes("DELIVERABLES"));
+  assert.ok(out.startsWith("# A\nAlpha\n"));
+  assert.ok(out.includes("AUTO-LINKS"));
 });
 
 test("CRLF 文件按 CRLF 写回", () => {
@@ -628,7 +572,7 @@ test("CRLF 文件按 CRLF 写回", () => {
   writeF(pjoin(dir, "b.md"), "# B\r\n\r\nAlpha\r\n");
   const p = planRun({
     settings: s, today: TODAY, allFiles: ["a.md", "b.md"],
-    contents: new Map([["a.md", "# A\n\nAlpha B\n"], ["b.md", "# B\n\nAlpha\n"]]), vaultAbsPath: dir,
+    contents: new Map([["a.md", "# A\n\nAlpha B\n"], ["b.md", "# B\n\nAlpha\n"]]),
   });
   const r = applyPlan(dir, p, s);
   assert.deepEqual(r.restored, []);
@@ -718,14 +662,14 @@ test("planRunAsync 与 planRun 结果相同（让出主线程不改变计算）"
   const s = defaultSettings();
   const contents = new Map<string, string>();
   for (let i = 0; i < 450; i++) contents.set(`N/n${i}.md`, `# 笔记${i}\n\n提到 笔记${(i * 7) % 450} 和 笔记${(i * 13) % 450}\n`);
-  const input = { settings: s, today: TODAY, allFiles: [...contents.keys()], contents, vaultAbsPath: "/V" };
+  const input = { settings: s, today: TODAY, allFiles: [...contents.keys()], contents };
   const a = planRun(input);
   const b = await planRunAsync(input);
   assert.deepEqual([...b.newContents], [...a.newContents]);
   assert.deepEqual([...b.mocChanges], [...a.mocChanges]);
 });
 
-test("实体来源：不读回自己的领域 tag；约定俗成的文件名、日期不当标题实体；同名的具体标题保留", () => {
+test("实体来源：不读回旧版写的领域 tag；约定俗成的文件名、日期不当标题实体；同名的具体标题保留", () => {
   const s = defaultSettings();
   const docs = [
     { rel: "a/README.md", title: "README", aliases: [], tags: ["domain/a", "project/x"] },
@@ -742,4 +686,35 @@ test("实体来源：不读回自己的领域 tag；约定俗成的文件名、�
   assert.ok(!terms.some((t) => /^(README|LICENSE|2026-09-20)$/.test(t)));
   assert.ok(terms.includes("项目 B 说明"));
   assert.ok(terms.includes("缓存淘汰策略对比"));
+});
+
+test("区块标签含正则元字符：按字面匹配，不抛异常", () => {
+  const tag = "LINKS(v2).*";
+  const withBlock = appendEndBlock("# T\n\nbody\n", tag, "- x\n");
+  assert.equal(stripEndBlock(withBlock, tag), "# T\n\nbody\n");
+  // 另一个只是“正则上能匹配”的标签不能把它剥掉
+  assert.equal(stripEndBlock(withBlock, "LINKS(v2)xx"), withBlock);
+});
+
+test("按目录生成领域：中文目录名各有各的 id，不会并成同一个领域", async () => {
+  const { detectDomainsFromDirs, newDomain } = await import("../src/core/settings.ts");
+  const ds = detectDomainsFromDirs(["项目", "研究", "Work Notes", "work-notes"]);
+  assert.deepEqual(ds.map((d) => d.id), ["项目", "研究", "work-notes", "work-notes-2"]);
+  assert.equal(new Set(ds.map((d) => d.id)).size, ds.length);
+  // 设置页「添加领域」同样避开已有 id
+  assert.equal(newDomain("项目", ["其他"], ds).id, "项目-2");
+});
+
+test("旧版向导词迁进自定义词表：去重、清空旧字段、匹配方式按词形推导", async () => {
+  const { migrateAutoAccepted } = await import("../src/core/config-text.ts");
+  const s = samplePreset();
+  s.entities.manual = [{ term: "缓存", aliases: ["cache"], caseSensitive: true, wordBoundary: false, weight: 2 }];
+  s.entities.autoAccepted = ["缓存", "Kubernetes"];
+  assert.equal(migrateAutoAccepted(s), true);
+  assert.deepEqual(s.entities.autoAccepted, []);
+  assert.deepEqual(s.entities.manual.map((r) => r.term), ["缓存", "Kubernetes"]);
+  assert.equal(s.entities.manual[0].weight, 2, "已有的词不被覆盖");
+  assert.equal(s.entities.manual[1].wordBoundary, true);
+  assert.equal(s.entities.manual[1].caseSensitive, false);
+  assert.equal(migrateAutoAccepted(s), false);
 });

@@ -12,6 +12,7 @@
 
 import type { App } from "obsidian";
 import type { Settings } from "../core/settings.ts";
+import { globMatch } from "../core/scope.ts";
 import type { AppLike } from "./runner.ts";
 
 export type Snapshot = Map<string, string>;
@@ -28,6 +29,11 @@ export interface WatchEvents {
   onPendingChange: (count: number) => void;
   /** 运行一次引擎；返回值 = 引擎**自己写过**的路径（用于区分外部改动，可为 void） */
   onQuietReached: () => Promise<readonly string[] | void>;
+  /**
+   * 把轮询定时器交给宿主登记（插件里是 Plugin.registerInterval）：即便 stop() 没被调用，
+   * 插件卸载时 Obsidian 也会清掉它。不传则只靠 stop()（测试里就是这样）。
+   */
+  registerInterval?: (id: number) => number;
 }
 
 export class ChangeWatcher {
@@ -69,7 +75,8 @@ export class ChangeWatcher {
       if (s.scan.excludeHidden && p.startsWith(".")) return true;
       if (s.scan.excludeAnyDirs.includes(p)) return true;
     }
-    return false;
+    // 设置页「跳过的文件夹」：那里的改动不该触发一轮什么都不改的运行
+    return s.scan.excludeGlobs.some((g) => globMatch(g, path));
   }
 
   resetBaseline(): void {
@@ -91,6 +98,7 @@ export class ChangeWatcher {
     this.resetBaseline();
     const periodMs = Math.max(2, this.settings.trigger.pollIntervalSec) * 1000;
     this.timer = window.setInterval(() => this.tick(), periodMs);
+    this.events.registerInterval?.(this.timer);
   }
 
   stop(): void {

@@ -71,16 +71,15 @@ class FakeVault {
     return { path };
   }
 
+  async createFolder(path: string): Promise<unknown> {
+    this.dirs.add(path);
+    return { path, children: [] };
+  }
+
   adapter = {
     readBinary: (p: string) => this.readBinary(p),
     exists: async (p: string) => this.files.has(p) || this.dirs.has(p),
-    mkdir: async (p: string) => {
-      this.dirs.add(p);
-    },
     read: async (p: string) => this.files.get(p) ?? "",
-    write: async (p: string, d: string) => {
-      this.files.set(p, d);
-    },
     getBasePath: () => "/fake-vault",
   };
 }
@@ -116,12 +115,12 @@ test("适配层端到端：plan → apply → 写入正文与 MOC，保护校验
   assert.ok(out.writtenPaths.includes("eng/a.md"));
   assert.ok(out.writtenPaths.includes("_moc/00-主页.md"));
 
-  // 正文写入：补了 frontmatter + 托管区块
+  // 正文写入：原文不动，末尾追加托管区块
   const a = vault.files.get("eng/a.md") as string;
-  assert.match(a, /^---\ntags: \[domain\/engineering\]\n---\n/);
+  assert.ok(a.startsWith("# A 文档\n\n关于 API 与缓存的说明。\n"));
   assert.match(a, /<!-- AUTO-LINKS:START -->/);
   assert.match(a, /\[\[eng\/b\|B 文档\]\]/);
-  // MOC 新建（目录不存在时应自动 mkdir + create）
+  // MOC 新建（目录不存在时应自动 createFolder + create）
   assert.ok(vault.files.has("_moc/工程.md"));
   assert.ok(vault.files.has("_moc/00-主页.md"));
   assert.ok(vault.dirs.has("_moc"));
@@ -348,4 +347,30 @@ test("界面语言跟随 Obsidian：非中文界面的运行报告是英文", as
   } finally {
     setUiLocale("zh-cn");
   }
+});
+
+test("ChangeWatcher：轮询定时器交给宿主登记（插件卸载时由 Obsidian 清理）", () => {
+  const { app } = makeApp({ "eng/a.md": "# A\n" });
+  const registered: number[] = [];
+  const watcher = new ChangeWatcher(app, defaultSettings(), {
+    onPendingChange: () => {},
+    onQuietReached: async () => {},
+    registerInterval: (id) => {
+      registered.push(id);
+      return id;
+    },
+  });
+  watcher.start();
+  watcher.stop();
+  assert.equal(registered.length, 1);
+});
+
+test("ChangeWatcher：「跳过的文件夹」里的改动不进快照", () => {
+  const { app } = makeApp({ "eng/a.md": "# A\n", "Archive/old/b.md": "# B\n" });
+  const s = defaultSettings();
+  s.scan.excludeGlobs = ["Archive"];
+  const watcher = new ChangeWatcher(app, s, { onPendingChange: () => {}, onQuietReached: async () => {} });
+  const snap = watcher.snapshot();
+  assert.equal(snap.has("eng/a.md"), true);
+  assert.equal(snap.has("Archive/old/b.md"), false);
 });

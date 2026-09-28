@@ -3,7 +3,7 @@
   "name": "Vault Linker",
   "version": "0.1.0",
   "minAppVersion": "1.5.0",
-  "description": "Auto-generate MOC index pages, entity-based related-document links, domain tags and daily-report traceability. Everything configurable; links are written into plain Markdown so any tool (grep, git, scripts) can read them.",
+  "description": "Build an index page for each area of your vault and a ranked list of related notes at the end of each note, in plain Markdown, without touching your own text.",
   "author": "qunwei",
   "isDesktopOnly": false,
   "authorUrl": "https://github.com/goldenxingxing"

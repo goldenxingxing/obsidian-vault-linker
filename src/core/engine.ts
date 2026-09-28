@@ -10,17 +10,16 @@
  */
 
 import type { DomainRule, Settings } from "./settings.ts";
-import { pyBasename, pyCompare, pySort } from "./pycompat.ts";
+import { pySort } from "./pycompat.ts";
 import { classify } from "./classify.ts";
-import { collectInScope, isExcludedFile } from "./scope.ts";
+import { collectInScope } from "./scope.ts";
 import { titleOf, summaryOf, wikilink, fillTemplate } from "./text.ts";
 import { appendEndBlock, blockSeparator, stripAllBlocks } from "./blocks.ts";
-import { insertSourceLink, isOptedOut, isPluginDataFile, withDomainTag } from "./frontmatter.ts";
+import { isOptedOut, isPluginDataFile } from "./frontmatter.ts";
 import { buildEntityMatchers, entitiesOf, entitySourceDoc, entityText, type EntityMatcher } from "./entities.ts";
 import { EntityIndex } from "./multimatch.ts";
 import { buildPostings, computeDf, linkTargets, weightMap } from "./score.ts";
-import { allDomains, buildHome, buildMoc, dateFromPath, homePath, isForeignMoc, mocPath } from "./moc.ts";
-import { extractDeliverables } from "./daily.ts";
+import { allDomains, buildHome, buildMoc, homePath, isForeignMoc, mocPath } from "./moc.ts";
 import { checkLinks } from "./verify.ts";
 
 export interface EngineInput {
@@ -35,8 +34,6 @@ export interface EngineInput {
   skippedBinary?: readonly string[];
   /** 被排除的 md 计数 */
   excludedCount?: number;
-  /** vault 绝对路径（识别日报里的绝对路径引用用），可选 */
-  vaultAbsPath?: string;
   /** 当前 _moc/*.md 的内容（这些文件在扫描范围之外，需单独读取） */
   mocContents?: ReadonlyMap<string, string>;
 }
@@ -54,16 +51,10 @@ export interface RunReport {
   skippedBinary: number;
   domains: Array<{ id: string; name: string; count: number }>;
   plannedChanges: number;
-  fmAdded: number;
   mocPlanned: number;
   /** 目标路径被非本插件文件占用、因而**未写入**的 MOC（保护用户自己的同名文件） */
   mocConflicts: string[];
   autoLinkTotal: number;
-  dailyParsed: number;
-  deliverablesExisting: number;
-  deliverablesMissing: number;
-  sourceLinkPairs: number;
-  sourceLinkDocs: number;
   warnings: string[];
   unmappedFiles: string[];
   brokenManaged: Array<[string, string]>;
@@ -174,64 +165,13 @@ function* planSteps(input: EngineInput): Generator<void, PlanOutput, void> {
     if (i % YIELD_EVERY === YIELD_EVERY - 1) yield;
   }
 
-  // ---- F4 日报解析
   const fileSet = new Set(input.allFiles);
-  const dailies = new Map<string, { date: string; existing: string[]; missing: string[] }>();
-  const sourceMap = new Map<string, Array<[string, string]>>();
-  let deliverablesExisting = 0;
-  let deliverablesMissing = 0;
-  if (s.daily.enabled) {
-    for (const rel of rels) {
-      if (!rel.startsWith(s.daily.dirPrefix)) continue;
-      const date = dateFromPath(rel, s);
-      if (!date) continue;
-      const { existing, missing } = extractDeliverables(
-        stripAllBlocks(input.contents.get(rel) as string, s),
-        fileSet,
-        s,
-        input.vaultAbsPath,
-      );
-      dailies.set(rel, { date, existing, missing });
-      deliverablesExisting += existing.length;
-      deliverablesMissing += missing.length;
-      for (const d of existing) {
-        if (d.endsWith(".md") && !isExcludedFile(d, s)) {
-          const arr = sourceMap.get(d) ?? [];
-          arr.push([date, rel]);
-          sourceMap.set(d, arr);
-        }
-      }
-    }
-  }
-  let sourceLinkPairs = 0;
-  for (const v of sourceMap.values()) sourceLinkPairs += v.length;
 
-  // ---- 逐篇改写（F5 frontmatter / F4 出处与产出 / F3 相关文档）
+  // ---- 逐篇改写：剥掉旧区块，按需追加「相关笔记」区块
   const transform = (rel: string, c: string): string => {
     if (isOptedOut(c, s)) return c;
-    let out = withDomainTag(stripAllBlocks(c, s), domains.get(rel) as string, s);
+    const out = stripAllBlocks(c, s);
     const sep = blockSeparator(out, s);
-
-    const refs = sourceMap.get(rel);
-    if (refs) {
-      const sorted = [...refs].sort((a, b) => pyCompare(a[0], b[0]) || pyCompare(a[1], b[1]));
-      const joined = sorted
-        .map(([dt, dr]) => wikilink(dr, dt + s.texts.sourceRefSuffix))
-        .join(s.texts.sourceSeparator);
-      out = insertSourceLink(out, fillTemplate(s.texts.sourceLine, { refs: joined }), s);
-    }
-
-    const dl = dailies.get(rel);
-    if (dl && dl.existing.length > 0) {
-      let body = s.texts.deliverablesHeading + "\n\n";
-      for (const d of dl.existing) {
-        const link = d.endsWith(".md")
-          ? wikilink(d, titles.get(d) ?? pyBasename(d).slice(0, -3))
-          : wikilink(d, undefined, true);
-        body += fillTemplate(s.texts.deliverablesEntryLine, { link }) + "\n";
-      }
-      out = appendEndBlock(out, s.daily.blockTag, body, sep);
-    }
 
     if (!s.related.enabled) return out;
     const dom = domainById.get(domains.get(rel) as string) as DomainRule;
@@ -245,17 +185,12 @@ function* planSteps(input: EngineInput): Generator<void, PlanOutput, void> {
 
   const newContents = new Map<string, string>();
   const changedDocs: string[] = [];
-  let fmAdded = 0;
   let autoLinkTotal = 0;
   for (const rel of rels) {
     const orig = input.contents.get(rel) as string;
     const out = transform(rel, orig);
     newContents.set(rel, out);
     if (out !== orig) changedDocs.push(rel);
-    if (!isOptedOut(orig, s)) {
-      const stripped = stripAllBlocks(orig, s);
-      if (withDomainTag(stripped, domains.get(rel) as string, s) !== stripped) fmAdded++;
-    }
     autoLinkTotal += (autolinks.get(rel) as string[]).length;
   }
 
@@ -341,15 +276,9 @@ function* planSteps(input: EngineInput): Generator<void, PlanOutput, void> {
     skippedBinary: input.skippedBinary?.length ?? 0,
     domains: mocReport,
     plannedChanges: changedDocs.length,
-    fmAdded,
     mocPlanned: mocChanges.size,
     mocConflicts,
     autoLinkTotal,
-    dailyParsed: dailies.size,
-    deliverablesExisting,
-    deliverablesMissing,
-    sourceLinkPairs,
-    sourceLinkDocs: sourceMap.size,
     warnings,
     unmappedFiles,
     brokenManaged,
@@ -379,7 +308,6 @@ export function planFromFiles(
   readText: (rel: string) => string | null,
   s: Settings,
   today: string,
-  vaultAbsPath?: string,
   mocContents?: ReadonlyMap<string, string>,
 ): PlanOutput {
   const { inScope, excludedCount } = collectInScope(allFiles, s);
@@ -397,7 +325,6 @@ export function planFromFiles(
     contents,
     skippedBinary,
     excludedCount,
-    vaultAbsPath,
     mocContents,
   });
 }

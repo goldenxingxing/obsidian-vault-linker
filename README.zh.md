@@ -16,7 +16,7 @@ Vault Linker 在笔记之上维护一层「链接」：给 vault 的每个领域
   应用都能看到。卸载插件，链接还在。
 - **零配置就能用。**顶层目录自动成为领域；笔记标题、别名和标签就是用来判断相关性的主题。`README`、
   `index`、日期这类说明不了笔记讲什么的名字会被自动忽略。
-- **从你的笔记里挖出你的术语。**实体候选向导不需要词典，中英文都能从 vault 里挖出候选术语，由你勾选。
+- **从你的笔记里挖出你的术语。**「从笔记里找」不需要词典，中英文都能从 vault 里挖出候选术语，由你勾选。
 - **不漏掉 Obsidian 之外的改动。**脚本、同步工具、AI agent 写的文件未必触发 Obsidian 的文件事件，
   所以另有轮询兜底。
 - **快，而且不打扰。**800 篇约 1 秒、3000 篇约 6 秒，分段计算，Obsidian 不会卡住。结果确定：
@@ -69,7 +69,7 @@ Vault Linker 在笔记之上维护一层「链接」：给 vault 的每个领域
 **从 Release 安装**
 
 1. 在 [最新 Release](https://github.com/goldenxingxing/obsidian-vault-linker/releases/latest)
-   下载 `main.js` 和 `manifest.json`。
+   下载 `main.js`、`manifest.json` 和 `styles.css`。
 2. 放进 `<你的 vault>/.obsidian/plugins/vault-linker/`（`.obsidian` 是隐藏目录；macOS 访达里按
    `⌘ ⇧ .` 显示）。
 3. 在 Obsidian 里：**设置 → 第三方插件 → 已安装插件 → 启用 Vault Linker**。
@@ -77,16 +77,20 @@ Vault Linker 在笔记之上维护一层「链接」：给 vault 的每个领域
 **用 BRAT 安装**（自动更新）：装好 [BRAT](https://github.com/TfTHacker/obsidian42-brat) 插件，
 选「Add beta plugin」，填 `goldenxingxing/obsidian-vault-linker`。
 
-**从源码构建**：`npm install && npm run build`，再像上面一样拷贝 `main.js` 和 `manifest.json`。
+**从源码构建**：`npm install && npm run build`，再像上面一样拷贝 `main.js`、`manifest.json` 和 `styles.css`。
 
 ## 上手
 
 启用后插件**不会自动改动任何文件**。
 
 1. 打开 **设置 → Vault Linker**。
-2. 点 **预览**，看它会改什么，这一步不写盘。还没配置领域时，第一次运行会给每个含笔记的顶层目录生成一个领域。
-3. 满意后点 **写入**。
-4. 想让它随你写作自动更新，再打开 **监听文件变更** 和 **自动运行时直接写入**。
+2. 点 **预览**，看它会改什么，这一步不写盘。
+3. 满意后点 **更新链接**。
+4. 想让它随你写作自动更新，打开 **自动更新**。
+
+要配置的就这些。设置页一共六项：立即运行、自动更新、每篇笔记的相关链接数、索引页、跳过的文件夹、可选的主题词。
+每个顶层文件夹自动有自己的索引页，之后新建的文件夹也一样。更细的参数（打分、生成的文字、时机）
+都有合适的默认值，放在设置 JSON 里：**导出**、修改、再 **导入**。
 
 每次运行后的报告会列出改了什么、跳过了什么、为什么跳过；每次运行也会追加到
 `.obsidian/plugins/vault-linker/vault-linker.log`。
@@ -95,7 +99,7 @@ Vault Linker 在笔记之上维护一层「链接」：给 vault 的每个领域
 
 每次写入都经过这些检查：
 
-- **先预览。**不点「写入」、不打开自动写入，就什么都不写。
+- **先预览。**不点「更新链接」、不开「自动更新」，就什么都不写。
 - **变了就跳过。**预览之后被改过的笔记，这次不动。
 - **写后核对，出错还原。**写完后，去掉区块的笔记必须与原文逐字节一致，否则写回原始字节。
 - **不覆盖你的文件。**索引页的位置上如果已有不是它生成的文件（比如你自己写的 `_moc/Home.md`），
@@ -106,24 +110,24 @@ Vault Linker 在笔记之上维护一层「链接」：给 vault 的每个领域
 - **保留格式。**Windows 换行（CRLF）写回时保持不变。以一条 `---` 分隔线开头的笔记，区块前改用 `***`，
   绝不会把你的正文变成 frontmatter。
 
-## 实体来源
+## 主题
 
-「实体」就是用来判断两篇笔记是否相关的主题。插件不预置任何领域词，由几个来源组合：
+「主题」就是用来判断两篇笔记是否相关的依据。插件不预置任何领域词，由这几个来源组合：
 
 | 来源 | 是什么 | 默认 |
 |---|---|---|
-| E1 标题与别名 | 每篇笔记的标题和 `aliases` | 开 |
-| E2 标签 | 你已经在用的 tag | 开 |
-| E3 自定义词表 | 你自己的词，可带别名和权重 | 空 |
-| E4 候选向导 | 从 vault 里挖出的术语，勾选后加入 | 按需打开 |
+| 笔记标题和别名 | 每篇笔记的标题和 `aliases` | 始终 |
+| 标签 | 你已经在用的 tag | 始终 |
+| 主题词 | 你自己的词，每行一个，可带别名 | 空 |
+| 从笔记里找 | 从 vault 里挖出的术语，勾选的加进主题词 | 按需打开 |
 
-向导会把长标识符拆成单词；中文按 2–4 字片段，看它内部结合得多紧、左右邻字有多杂，不靠词典也能找出
+「从笔记里找」会把长标识符拆成单词；中文按 2–4 字片段，看它内部结合得多紧、左右邻字有多杂，不靠词典也能找出
 真正的术语。在一个 762 篇的中文 vault 上，人工整理的 41 个领域词里有 39 个出现在候选中。向导给的是
 可搜索的完整候选列表而不是前 N 名，因为少见的术语排名靠后，却同样重要。
 
 ## 性能
 
-以标题和标签作实体实测（每轮都整库重算）：
+以标题和标签作主题实测（每轮都整库重算）：
 
 | 篇数 | 每轮耗时 |
 |---|---|
@@ -138,10 +142,10 @@ Vault Linker 在笔记之上维护一层「链接」：给 vault 的每个领域
 
 | 命令 | 作用 |
 |---|---|
-| 预览（dry-run，不写盘） | 只出报告 |
-| 立即运行（写入 vault） | 写入、核对，失败则还原 |
+| 预览（不改任何文件） | 只出报告 |
+| 立即更新链接 | 写入、核对，失败则还原 |
 | 显示上次运行报告 | 弹窗展示上次报告，可复制 |
-| 实体候选向导 | 从 vault 里挖候选术语 |
+| 从笔记里找主题词 | 从 vault 里挖候选术语 |
 
 同一个引擎也能在 Obsidian 之外用命令行运行：
 
@@ -152,7 +156,7 @@ node src/cli.ts --vault <vault> --config <vault>/.obsidian/plugins/vault-linker/
 
 ## 配置可以分享
 
-**设置 → 配置导入 / 导出**会把全部配置（包括领域和词表）变成一段 JSON，别人可以直接导入。
+**设置 → 导入 / 导出设置**会把全部配置（包括领域和词表）变成一段 JSON，别人可以直接导入。
 
 ## 限制
 
@@ -167,7 +171,7 @@ node src/cli.ts --vault <vault> --config <vault>/.obsidian/plugins/vault-linker/
 ```bash
 npm install
 npm run typecheck
-npm test            # 65 项测试，Node 直接运行
+npm test            # Node（22.18+）直接运行
 npm run build       # 生成 main.js
 ```
 
@@ -176,6 +180,16 @@ npm run build       # 生成 main.js
   的一小部分（鸭子类型），所以 `tests/adapter.test.ts` 能用内存里的假 vault 跑通
   读取 → 计划 → 写入 → 核对 → 还原 的全过程。
 - 被 `node --test` 直接导入的模块只用可擦除的 TypeScript 语法（不用 `enum`、`namespace`、参数属性）。
+
+### 发版
+
+```bash
+npm version patch   # 同步改 package.json、manifest.json、versions.json，并打 tag
+git push && git push --tags
+```
+
+推送 tag 会触发 `.github/workflows/release.yml`：测试、构建，并建一个带 `main.js`、`manifest.json`、`styles.css`
+的草稿 Release，检查后手动发布。tag 必须与版本号完全一致、不带 `v` 前缀（`.npmrc` 里设了 `tag-version-prefix=""`）。
 
 ## 许可
 

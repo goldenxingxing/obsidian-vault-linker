@@ -3,7 +3,6 @@
  */
 
 import { DEFAULT_MOC_FOLDER, textsFor, type DomainRule, type Settings } from "./settings.ts";
-import { pyCompare, pySort } from "./pycompat.ts";
 import { fillTemplate, wikilink } from "./text.ts";
 
 /**
@@ -69,15 +68,6 @@ export function homePath(s: Settings): string {
   return `${safeDirPath(s.moc.folder)}/${safeFileName(s.moc.homeFile)}.md`;
 }
 
-export function dailyFileRegex(s: Settings): RegExp {
-  return new RegExp(s.daily.fileRegex);
-}
-
-export function dateFromPath(rel: string, s: Settings): string | null {
-  const m = dailyFileRegex(s).exec(rel);
-  return m ? m[1] : null;
-}
-
 export interface MocInputs {
   titles: ReadonlyMap<string, string>;
   summaries: ReadonlyMap<string, string>;
@@ -111,32 +101,8 @@ export function buildMoc(
     "",
   ];
 
-  if (domain.id === s.daily.domainId && s.daily.enabled) {
-    // 按"日报目录下一层"（通常是月份目录）再分组
-    const depth = s.daily.dirPrefix.split("/").filter(Boolean).length;
-    const groups = new Map<string, string[]>();
-    for (const rel of rels) {
-      const parts = rel.split("/");
-      const g = parts.length > depth + 1 ? parts[depth] : s.texts.dailyOtherGroup;
-      const list = groups.get(g);
-      if (list) list.push(rel);
-      else groups.set(g, [rel]);
-    }
-    for (const g of pySort([...groups.keys()])) {
-      lines.push("## " + g);
-      lines.push("");
-      const dayKey = (r: string): string => dateFromPath(r, s) ?? r;
-      const sorted = [...(groups.get(g) as string[])].sort((a, b) => pyCompare(dayKey(a), dayKey(b)));
-      for (const rel of sorted) {
-        const disp = dateFromPath(rel, s) ?? titles.get(rel) ?? rel;
-        lines.push(entryLine(wikilink(rel, disp), rel, summaries, s));
-      }
-      lines.push("");
-    }
-  } else {
-    for (const rel of rels) lines.push(entryLine(wikilink(rel, titles.get(rel)), rel, summaries, s));
-    lines.push("");
-  }
+  for (const rel of rels) lines.push(entryLine(wikilink(rel, titles.get(rel)), rel, summaries, s));
+  lines.push("");
 
   return lines.join("\n");
 }

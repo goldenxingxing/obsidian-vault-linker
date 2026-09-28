@@ -48,14 +48,5 @@ export function samplePreset(): Settings {
     ignoreInCode: false,
   };
   s.moc = { enabled: true, folder: "_moc", homeFile: "00-主页", includeSummary: true, summaryMaxChars: 60, excludedNote: "videos/、_tmp/、_archive/" };
-  s.frontmatter = { enabled: true, tagPrefix: "domain/", optOutKey: "vault-linker", optOutValue: "ignore" };
-  s.daily = {
-    ...s.daily,
-    enabled: true,
-    dirPrefix: "reports/daily/",
-    fileRegex: "D-(\\d{4}-\\d{2}-\\d{2})\\.md$",
-    stripPathPrefixes: ["output/"],
-    barePathPrefixes: ["output/"],
-  };
   return s;
 }

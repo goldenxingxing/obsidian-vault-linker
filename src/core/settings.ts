@@ -2,7 +2,7 @@
  * settings.ts — 配置模型：类型、通用默认值、预设
  *
  * 设计目标（"别人也能用"）：**零配置可用 → 精细可配 → 配置可分享**。
- * 领域映射、实体词表、区块标签、文案、日报路径……全部可配置，另有两个预设：
+ * 领域映射、实体词表、区块标签、文案……全部可配置，另有两个预设：
  *
  *   generic        —— 通用默认：零配置就能跑（领域自动探测 + 实体走标题/标签）
  *   zh-research    —— 中文研究型 vault
@@ -22,7 +22,7 @@ export interface DomainRule {
   /**
    * 匹配模式（相对 vault 根的路径）：
    *   "projects"      顶层目录 projects 下的一切
-   *   "reports/daily" 子目录
+   *   "work/meetings" 子目录
    *   "reports/**"    通配（* 不跨 /，** 跨 /）
    */
   paths: string[];
@@ -59,16 +59,10 @@ export interface Texts {
   homeDomainLine: string;
   homeTotalLine: string;
   mocEntryLine: string;
-  dailyOtherGroup: string;
   noSummary: string;
   relatedHeading: string;
   relatedNavLine: string;
   relatedEntryLine: string;
-  deliverablesHeading: string;
-  deliverablesEntryLine: string;
-  sourceLine: string;
-  sourceRefSuffix: string;
-  sourceSeparator: string;
   unmappedWarning: string;
 }
 
@@ -139,31 +133,9 @@ export interface Settings {
   };
 
   frontmatter: {
-    enabled: boolean;
-    tagPrefix: string;
+    /** frontmatter 里写「optOutKey: optOutValue」的笔记整篇不碰 */
     optOutKey: string;
     optOutValue: string;
-  };
-
-  daily: {
-    enabled: boolean;
-    /** 日报所在目录前缀（含结尾 /） */
-    dirPrefix: string;
-    /** 这个领域在 MOC 里按“子目录”再分组（通常是月份） */
-    domainId: string;
-    /** 从文件路径提取日期的正则（group 1 = 日期） */
-    fileRegex: string;
-    blockTag: string;
-    sourceBlockTag: string;
-    /** 产出路径的允许扩展名 */
-    allowedExtensions: string[];
-    /** 识别产出的路径前缀（如 "output/"），提取时会被剥掉 */
-    stripPathPrefixes: string[];
-    /** 产出引用出现在正文里的形式：反引号 / 裸路径 */
-    scanBackticks: boolean;
-    scanBarePaths: boolean;
-    /** 裸路径识别的起始前缀 */
-    barePathPrefixes: string[];
   };
 
   trigger: {
@@ -196,16 +168,10 @@ const TEXTS_ZH: Texts = {
   homeDomainLine: "- {link} — {count} 篇",
   homeTotalLine: "**在范围文档总数：{total} 篇**",
   mocEntryLine: "- {link} — {summary}",
-  dailyOtherGroup: "其他",
   noSummary: "（无摘要）",
   relatedHeading: "## 相关文档",
   relatedNavLine: "- 导航：{link}",
   relatedEntryLine: "- {link}",
-  deliverablesHeading: "## 当日产出链接",
-  deliverablesEntryLine: "- {link}",
-  sourceLine: "> 📍 出处：{refs}",
-  sourceRefSuffix: " 日报",
-  sourceSeparator: "、",
   unmappedWarning: "未映射目录归入根目录待归档: {rel}",
 };
 
@@ -218,16 +184,10 @@ const TEXTS_EN: Texts = {
   homeDomainLine: "- {link} — {count} notes",
   homeTotalLine: "**Notes in scope: {total}**",
   mocEntryLine: "- {link} — {summary}",
-  dailyOtherGroup: "Other",
   noSummary: "(no summary)",
   relatedHeading: "## Related notes",
   relatedNavLine: "- Index: {link}",
   relatedEntryLine: "- {link}",
-  deliverablesHeading: "## Deliverables",
-  deliverablesEntryLine: "- {link}",
-  sourceLine: "> 📍 Source: {refs}",
-  sourceRefSuffix: " daily",
-  sourceSeparator: ", ",
   unmappedWarning: "Unmapped folder → fallback domain: {rel}",
 };
 
@@ -329,28 +289,8 @@ export function defaultSettings(): Settings {
       excludedNote: "",
     },
     frontmatter: {
-      // 默认关：只给还没有 frontmatter 的笔记补，已有的和挪过目录的都不更新，
-      // 这个标签既不全也不准，拿它筛选会漏；需要时再打开
-      enabled: false,
-      tagPrefix: "domain/",
       optOutKey: "vault-linker",
       optOutValue: "ignore",
-    },
-    daily: {
-      enabled: false,
-      dirPrefix: "reports/daily/",
-      domainId: "daily",
-      fileRegex: "D-(\\d{4}-\\d{2}-\\d{2})\\.md$",
-      blockTag: "DELIVERABLES",
-      sourceBlockTag: "SOURCE-LINK",
-      allowedExtensions: [
-        "md", "py", "json", "ts", "js", "jsx", "tsx", "swift", "yaml", "yml",
-        "csv", "txt", "html", "sh", "sql", "dart", "kt", "toml", "ini", "xml",
-      ],
-      stripPathPrefixes: [],
-      scanBackticks: true,
-      scanBarePaths: true,
-      barePathPrefixes: [],
     },
     trigger: {
       // 第三方安全默认：装完**什么都不自动做**（不轮询、不写盘）。
@@ -425,25 +365,49 @@ function mergeOneLevel(base: Record<string, unknown>, saved: Record<string, unkn
 /** 供首次运行向导使用：按顶层目录自动生成领域规则。 */
 export function detectDomainsFromDirs(topDirs: readonly string[]): DomainRule[] {
   const skip = new Set(["_moc", "_tmp", "_archive", "node_modules", "videos"]);
-  return topDirs
-    .filter((d) => !d.startsWith(".") && !skip.has(d))
-    .map((d) => ({
-      id: slugify(d),
-      name: d,
-      paths: [d],
-      rootKeywords: [],
-      rootKeywordsLower: [],
-      rootPrefixes: [],
-      priority: 0,
-    }));
+  const out: DomainRule[] = [];
+  for (const d of topDirs) {
+    if (d.startsWith(".") || skip.has(d)) continue;
+    out.push(newDomain(d, [d], out));
+  }
+  return out;
 }
 
+/**
+ * 新建一个领域（设置页「添加」、自动探测共用）。id 在 existing 里保证唯一：
+ * 领域按 id 归组，重复的 id 会把两个领域的笔记并进同一个索引页。
+ */
+export function newDomain(name: string, paths: string[], existing: readonly DomainRule[]): DomainRule {
+  return {
+    id: uniqueDomainId(name, existing),
+    name,
+    paths,
+    rootKeywords: [],
+    rootKeywordsLower: [],
+    rootPrefixes: [],
+    priority: 0,
+  };
+}
+
+function uniqueDomainId(name: string, existing: readonly DomainRule[]): string {
+  const taken = new Set(existing.map((d) => d.id));
+  const base = slugify(name);
+  let id = base;
+  for (let i = 2; taken.has(id); i++) id = `${base}-${i}`;
+  return id;
+}
+
+/**
+ * id 同时是 frontmatter tag 的后缀（domain/<id>），所以只留 tag 里合法的字符。
+ * 中文等非 ASCII 字母照样保留：只剩 ASCII 的话，所有中文目录都会变成同一个 "domain"。
+ */
 function slugify(s: string): string {
-  const ascii = s
+  const slug = s
     .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/[\s#,.:;!?'"`()[\]{}<>|\\/+*=&%$@^~]+/g, "-")
+    .replace(/-+/g, "-")
     .replace(/^-+|-+$/g, "");
-  return ascii || "domain";
+  return slug || "domain";
 }
 
 export function todayIso(): string {

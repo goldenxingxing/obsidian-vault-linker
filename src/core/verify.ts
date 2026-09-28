@@ -4,7 +4,6 @@
 
 import { managedBlockSpans } from "./blocks.ts";
 import { safeDirPath } from "./moc.ts";
-import { withDomainTag } from "./frontmatter.ts";
 import { stripAllBlocks } from "./blocks.ts";
 import { pySort } from "./pycompat.ts";
 import type { Settings } from "./settings.ts";
@@ -59,7 +58,7 @@ export function checkLinks(
 }
 
 /**
- * 写后保护校验：剥离全部托管区块后，当前内容应与"原文（+ 可能补的 frontmatter）"逐字节一致。
+ * 写后保护校验：剥离全部托管区块后，当前内容应与原文逐字节一致。
  *
  * 原文不以换行结尾时，追加区块用 "\n\n" 粘合，而剥离只能吃掉一个 "\n"，剥离后比原文
  * 多一个结尾换行。这是预期内的变更，校验时照此补上；否则这类笔记每次都被判失败、回滚，
@@ -68,12 +67,10 @@ export function checkLinks(
 export function protectionOk(
   original: string,
   current: string,
-  domainId: string,
   s: Settings,
 ): boolean {
-  const origStripped = stripAllBlocks(original, s);
   const nowStripped = stripAllBlocks(current, s);
-  let expected = withDomainTag(origStripped, domainId, s);
+  let expected = stripAllBlocks(original, s);
   if (expected !== "" && !expected.endsWith("\n")) {
     expected += "\n";
   }

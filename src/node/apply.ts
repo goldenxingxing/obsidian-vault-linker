@@ -67,7 +67,7 @@ export function applyPlan(
       const orig = plan.originals.get(rel) as string;
       const now = readTextOrNull(join(vaultRoot, rel));
       if (now === null) continue;
-      if (protectionOk(orig, now, plan.domains.get(rel) as string, s)) continue;
+      if (protectionOk(orig, now, s)) continue;
       // 我们写完又被外部改了？→ 保留现场；否则是我们自己的问题 → 恢复
       const expected = plan.writes.get(rel);
       if (now !== expected) {

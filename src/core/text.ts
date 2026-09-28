@@ -39,9 +39,9 @@ export function summaryOf(content: string, s: Settings): string {
   return s.texts.noSummary;
 }
 
-/** `[[target]]` 或 `[[target|display]]`；ext=true 时保留扩展名（用于非 md 产出） */
-export function wikilink(rel: string, display?: string, ext = false): string {
-  const target = ext ? rel : rel.slice(0, -3);
+/** `[[target]]` 或 `[[target|display]]`（rel 是 .md 路径，链接里去掉扩展名） */
+export function wikilink(rel: string, display?: string): string {
+  const target = rel.slice(0, -3);
   if (display) return `[[${target}|${cleanAlias(display)}]]`;
   return `[[${target}]]`;
 }

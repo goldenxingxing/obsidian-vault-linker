@@ -4,21 +4,31 @@
  * append_end_block / strip_all_blocks。
  *
  * 注意：剥离要替换**全部**区块，正则必须带 g 标志（漏了只剥第一处）。
- * 区块标签由配置提供，**不做正则转义**。
+ * 区块标签由配置提供，拼进正则前一律转义（用户可能填 `LINKS(v2)` 之类）。
  */
 
 import type { Settings } from "./settings.ts";
 import { hasFrontmatter } from "./frontmatter.ts";
+import { pyReEscape } from "./pycompat.ts";
 
-/** 结尾型区块（追加在文档末尾）：AUTO-LINKS / DELIVERABLES */
-export function stripEndBlock(content: string, tag: string): string {
+/**
+ * 旧版「日报 ↔ 产出」功能写过的区块。功能已移除，但笔记里可能还留着：
+ * 继续当作本插件的区块，下一次运行时就会被干净地删掉，写后校验也照常成立。
+ */
+const LEGACY_END_TAG = "DELIVERABLES";
+const LEGACY_SOURCE_TAG = "SOURCE-LINK";
+
+/** 结尾型区块（追加在文档末尾）：AUTO-LINKS */
+export function stripEndBlock(content: string, rawTag: string): string {
+  const tag = pyReEscape(rawTag);
   // 分隔线平时是 ---；笔记以 --- 开头又没有闭合时用 ***（见 blockSeparator）
   const re = new RegExp(`\\n?(?:---|\\*\\*\\*)\\n<!-- ${tag}:START -->[\\s\\S]*?<!-- ${tag}:END -->\\n?`, "g");
   return content.replace(re, "");
 }
 
-/** frontmatter 后插入的出处区块：SOURCE-LINK（文件开头 或 文件中部两种形式） */
-export function stripSourceBlock(content: string, tag: string): string {
+/** 旧版插在 frontmatter 后的出处区块 SOURCE-LINK（文件开头 或 文件中部两种形式） */
+export function stripSourceBlock(content: string, rawTag: string): string {
+  const tag = pyReEscape(rawTag);
   let c = content.replace(
     new RegExp(`^<!-- ${tag}:START -->[\\s\\S]*?<!-- ${tag}:END -->\\n`, "g"),
     "",
@@ -33,8 +43,8 @@ export function stripSourceBlock(content: string, tag: string): string {
 /** 剥离全部托管区块 */
 export function stripAllBlocks(content: string, s: Settings): string {
   let c = stripEndBlock(content, s.related.blockTag);
-  c = stripEndBlock(c, s.daily.blockTag);
-  c = stripSourceBlock(c, s.daily.sourceBlockTag);
+  c = stripEndBlock(c, LEGACY_END_TAG);
+  c = stripSourceBlock(c, LEGACY_SOURCE_TAG);
   return c;
 }
 
@@ -55,7 +65,7 @@ export function appendEndBlock(content: string, tag: string, body: string, sep =
  * START 与 END 两侧各自独立做标签轮换，不要求首尾标签相同。
  */
 export function managedBlockSpans(content: string, s: Settings): Array<[number, number]> {
-  const alt = [s.related.blockTag, s.daily.blockTag, s.daily.sourceBlockTag].join("|");
+  const alt = [s.related.blockTag, LEGACY_END_TAG, LEGACY_SOURCE_TAG].map(pyReEscape).join("|");
   const re = new RegExp(`<!-- (?:${alt}):START -->[\\s\\S]*?<!-- (?:${alt}):END -->`, "g");
   const spans: Array<[number, number]> = [];
   let m: RegExpExecArray | null;
@@ -70,8 +80,10 @@ export function managedBlockSpans(content: string, s: Settings): Array<[number, 
  * 区块前的分隔线。笔记以 `---` 开头却没有闭合（开头是一条分隔线，不是 frontmatter）时，
  * 追加的 `---` 会把它闭合：Obsidian 会把整篇正文当成 frontmatter 属性，正文从视图里消失。
  * 这种笔记改用 `***`（渲染出来同样是一条分隔线，但不会闭合 frontmatter）。
+ * 空笔记同理：区块会从第一行开始，`---` 开头的文件以后再加一条 `---` 就成了 frontmatter。
  */
 export function blockSeparator(content: string, s: Settings): string {
+  if (content === "") return "***";
   if (!content.startsWith("---\n")) return "---";
   return hasFrontmatter(content, s) ? "---" : "***";
 }

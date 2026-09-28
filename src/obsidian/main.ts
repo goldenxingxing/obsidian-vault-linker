@@ -3,11 +3,13 @@
  */
 
 import { setUiLocale, t } from "./i18n.ts";
-import { MarkdownView, Notice, Plugin, moment, type TAbstractFile } from "obsidian";
+import { MarkdownView, Notice, Plugin, type TAbstractFile } from "obsidian";
+import { obsidianLocale } from "./locale.ts";
 import {
   applyAutoTexts, defaultSettings, mergeSettings, todayIso, type Settings,
 } from "../core/settings.ts";
 import { ensureDomains } from "../core/scope.ts";
+import { migrateAutoAccepted } from "../core/config-text.ts";
 import type { PlanOutput } from "../core/engine.ts";
 import { applyPlanObsidian, effectiveSettings, formatReport, planVault, type ApplyOutcome } from "./runner.ts";
 import { ChangeWatcher } from "./watch.ts";
@@ -25,6 +27,7 @@ function watcherKey(s: Settings): string {
     s.scan.excludeTopDirs,
     s.scan.excludeAnyDirs,
     s.scan.excludeHidden,
+    s.scan.excludeGlobs,
   ]);
 }
 
@@ -43,7 +46,7 @@ export default class VaultLinkerPlugin extends Plugin {
 
   override async onload(): Promise<void> {
     // 界面语言跟随 Obsidian（命令名、提示、设置页、运行报告）
-    setUiLocale(moment.locale());
+    setUiLocale(obsidianLocale());
     await this.loadSettings();
     this.addSettingTab(new LinkerSettingTab(this.app, this));
     this.statusEl = this.addStatusBarItem();
@@ -51,22 +54,22 @@ export default class VaultLinkerPlugin extends Plugin {
 
     if (this.firstRun) {
       new Notice(
-        t("Vault Linker 已启用。默认不会自动改动任何文件：先在设置里点「预览」看看会改什么，" +
-          "确认后再打开「监听文件变更」与「自动写入」。",
-          "Vault Linker is enabled. It changes nothing on its own: click Preview in its settings to see what it would do, " +
-          "then turn on Watch for changes and Apply on automatic runs if you want it to keep links up to date."),
+        t("Vault Linker 已启用，它不会自己改动任何文件。打开它的设置点「预览」看看效果；" +
+          "满意就点「更新链接」，想让它一直保持更新，打开「自动更新」。",
+          "Vault Linker is enabled and changes nothing on its own. Open its settings and click Preview to see what it would do. " +
+          "If you like it, click Update links, and turn on Update automatically to keep links current."),
         12000,
       );
     }
 
     this.addCommand({
       id: "preview",
-      name: t("预览（dry-run，不写盘）", "Preview (writes nothing)"),
+      name: t("预览（不改任何文件）", "Preview (changes nothing)"),
       callback: () => void this.run("dry-run", true),
     });
     this.addCommand({
       id: "apply",
-      name: t("立即运行（写入 vault）", "Run now (writes to the vault)"),
+      name: t("立即更新链接", "Update links now"),
       callback: () => void this.run("apply", true),
     });
     this.addCommand({
@@ -76,40 +79,43 @@ export default class VaultLinkerPlugin extends Plugin {
     });
     this.addCommand({
       id: "entity-wizard",
-      name: t("实体候选向导（扫描并勾选领域术语）", "Entity candidate wizard"),
+      name: t("从笔记里找主题词", "Find terms in your notes"),
       callback: () => new EntityWizardModal(this.app, this).open(),
     });
 
-    // 事件只作"立刻看一眼"的提示；真正的判定在 ChangeWatcher 的轮询里
-    const onChange = (f: TAbstractFile): void => {
-      if (f.path.endsWith(".md")) this.watcher?.notifyChange();
-    };
-    this.registerEvent(this.app.vault.on("modify", onChange));
-    this.registerEvent(this.app.vault.on("create", onChange));
-    this.registerEvent(this.app.vault.on("delete", onChange));
-    this.registerEvent(this.app.vault.on("rename", onChange));
+    // 等 vault 索引完成再挂监听：布局就绪前 Obsidian 会为库里每个文件触发一次 create，
+    // 此时拍的基线也不完整，会把整个库误判成“有变更”
+    this.app.workspace.onLayoutReady(() => {
+      // 事件只作"立刻看一眼"的提示；真正的判定在 ChangeWatcher 的轮询里
+      const onChange = (f: TAbstractFile): void => {
+        if (f.path.endsWith(".md")) this.watcher?.notifyChange();
+      };
+      this.registerEvent(this.app.vault.on("modify", onChange));
+      this.registerEvent(this.app.vault.on("create", onChange));
+      this.registerEvent(this.app.vault.on("delete", onChange));
+      this.registerEvent(this.app.vault.on("rename", onChange));
 
-    this.startWatcher();
-    if (this.settings.trigger.runOnStartup) {
-      this.app.workspace.onLayoutReady(() => {
+      this.startWatcher();
+      if (this.settings.trigger.runOnStartup) {
         void this.run(this.settings.safety.dryRunByDefault ? "dry-run" : "apply", false, true);
-      });
-    }
+      }
+    });
   }
 
   override onunload(): void {
     this.watcher?.stop();
+    this.watcher = null;
   }
 
   async loadSettings(): Promise<void> {
     const data = await this.loadData();
     this.firstRun = data === null || data === undefined;
     this.settings = mergeSettings(defaultSettings(), data);
-    if (this.firstRun) {
-      // 首次安装：language: auto → 按 Obsidian 的语言选文案，并落盘（下次加载不再是“首次”）
-      applyAutoTexts(this.settings, moment.locale());
-      await this.saveData(this.settings);
-    }
+    // 首次安装：language: auto → 按 Obsidian 的语言选文案，并落盘（下次加载不再是“首次”）
+    if (this.firstRun) applyAutoTexts(this.settings, obsidianLocale());
+    // 旧版向导采纳的词挪进设置页上看得见的词表
+    const migrated = migrateAutoAccepted(this.settings);
+    if (this.firstRun || migrated) await this.saveData(this.settings);
   }
 
   async saveSettings(): Promise<void> {
@@ -130,6 +136,7 @@ export default class VaultLinkerPlugin extends Plugin {
       },
       // 返回引擎自己写过的路径，让监听层能区分“运行期外部改动”与“自己的写入”
       onQuietReached: async () => await this.run(this.settings.trigger.autoApply ? "apply" : "dry-run", false, true),
+      registerInterval: (id) => this.registerInterval(id),
     });
     this.watcher.start();
     this.updateStatus();
@@ -143,8 +150,8 @@ export default class VaultLinkerPlugin extends Plugin {
     this.statusEl.setText(parts.join(" · "));
   }
 
-  private logPath(): string {
-    const dir = this.manifest.dir ?? ".obsidian/plugins/vault-linker";
+  logPath(): string {
+    const dir = this.manifest.dir ?? `${this.app.vault.configDir}/plugins/${this.manifest.id}`;
     return `${dir}/vault-linker.log`;
   }
 
@@ -165,7 +172,6 @@ export default class VaultLinkerPlugin extends Plugin {
     }
   }
 
-  /** 跑一轮；返回**引擎自己写过**的路径（供监听层区分外部改动） */
   /** 编辑器里打开着的笔记 */
   private openFiles(): Set<string> {
     const out = new Set<string>();
@@ -176,7 +182,10 @@ export default class VaultLinkerPlugin extends Plugin {
     return out;
   }
 
-  /** @param auto 自动触发（监听 / 启动时）：跳过正在打开的笔记；手动运行则全部写 */
+  /**
+   * 跑一轮；返回**引擎自己写过**的路径（供监听层区分外部改动）
+   * @param auto 自动触发（监听 / 启动时）：跳过正在打开的笔记；手动运行则全部写
+   */
   async run(mode: "dry-run" | "apply", notify: boolean, auto = false): Promise<readonly string[]> {
     if (this.busy) {
       if (notify) new Notice(t("Vault Linker 正在运行中，请稍候…", "Vault Linker is already running…"));
@@ -184,15 +193,11 @@ export default class VaultLinkerPlugin extends Plugin {
     }
     this.busy = true;
     try {
-      const s = await effectiveSettings(this.app, this.settings);
-      // domains 为空 → 按顶层目录自动探测（设置页上承诺的“首次运行自动探测”）。
-      // 用生效配置探测，模板目录不会变成领域；结果写回用户配置
-      if (ensureDomains(s, this.app.vault.getFiles().map((f) => f.path))) {
-        this.settings.domains = s.domains;
-        await this.saveSettings();
-        new Notice(t(`Vault Linker：已按顶层目录自动生成 ${s.domains.length} 个领域（可在设置里改）`,
-          `Vault Linker: created ${s.domains.length} domains from top-level folders (you can edit them in settings)`));
-      }
+      // domains 为空（默认）→ 每轮都按当前的顶层文件夹生成领域，只用于本轮、不写回配置：
+      // 新建的顶层文件夹自动有自己的索引页，用户什么都不用配。
+      // 用生效配置探测，模板目录不会变成领域；浅拷贝，免得改到 this.settings
+      const s = { ...(await effectiveSettings(this.app, this.settings)) };
+      ensureDomains(s, this.app.vault.getFiles().map((f) => f.path));
       const plan = await planVault(this.app, s, todayIso());
       this.lastPlan = plan;
       let outcome: ApplyOutcome | undefined;
