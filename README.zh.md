@@ -69,13 +69,14 @@ Vault Linker 在笔记之上维护一层「链接」：给 vault 的每个领域
 
 ## 安装
 
-插件还没有上架社区插件库。
+**从社区插件库安装**（Obsidian 1.13+）：**设置 → 第三方插件 → 浏览**，搜索「Vault Linker Auto」，安装并启用。
+需要 Obsidian 1.13.0 或更高版本——设置页使用了声明式设置 API；旧版 Obsidian 会停留在最后一个兼容版本（0.2.2）。
 
-**从 Release 安装**
+**从 Release 手动安装**
 
 1. 在 [最新 Release](https://github.com/goldenxingxing/obsidian-vault-linker/releases/latest)
    下载 `main.js`、`manifest.json` 和 `styles.css`。
-2. 放进 `<你的 vault>/.obsidian/plugins/vault-linker-auto/`（`.obsidian` 是隐藏目录；macOS 访达里按
+2. 把这三个文件放进 `<你的 vault>/.obsidian/plugins/vault-linker-auto/`（`.obsidian` 是隐藏目录；macOS 访达里按
    `⌘ ⇧ .` 显示）。
 3. 在 Obsidian 里：**设置 → 第三方插件 → 已安装插件 → 启用 Vault Linker Auto**。
 
@@ -193,8 +194,9 @@ npm version patch   # 同步改 package.json、manifest.json、versions.json，�
 git push && git push --tags
 ```
 
-推送 tag 会触发 `.github/workflows/release.yml`：测试、构建，并建一个带 `main.js`、`manifest.json`、`styles.css`
-的草稿 Release，检查后手动发布。tag 必须与版本号完全一致、不带 `v` 前缀（`.npmrc` 里设了 `tag-version-prefix=""`）。
+推送 tag 会触发 `.github/workflows/release.yml`：跑测试、构建，给 `main.js`、`manifest.json`、`styles.css`
+做构建来源签名（GitHub artifact attestations），并自动发布 GitHub Release——无需手动操作。tag 必须与版本号
+完全一致、不带 `v` 前缀（`.npmrc` 里设了 `tag-version-prefix=""`）。
 
 ## 许可
 

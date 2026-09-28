@@ -76,13 +76,15 @@ plugin generated are ever removed.
 
 ## Install
 
-The plugin is not in the community plugin list yet.
+**From the community plugin list** (Obsidian 1.13+): **Settings → Community plugins → Browse**, search for
+"Vault Linker Auto", then install and enable it. Obsidian 1.13.0 or later is required — the settings page uses
+the declarative settings API; older Obsidian versions stay on the last compatible release (0.2.2).
 
-**From a release**
+**Manually from a release**
 
 1. Download `main.js`, `manifest.json` and `styles.css` from the
    [latest release](https://github.com/goldenxingxing/obsidian-vault-linker/releases/latest).
-2. Put both in `<your vault>/.obsidian/plugins/vault-linker-auto/`. (`.obsidian` is a hidden folder; in the macOS
+2. Put the three files in `<your vault>/.obsidian/plugins/vault-linker-auto/`. (`.obsidian` is a hidden folder; in the macOS
    Finder press `⌘ ⇧ .` to show it.)
 3. In Obsidian: **Settings → Community plugins → Installed plugins → enable Vault Linker Auto**.
 
@@ -208,9 +210,10 @@ npm version patch   # bumps package.json, manifest.json and versions.json, and t
 git push && git push --tags
 ```
 
-The tag triggers `.github/workflows/release.yml`, which tests, builds and creates a draft GitHub release with
-`main.js`, `manifest.json` and `styles.css`. Review and publish the draft. The tag must equal the version, with no
-`v` prefix (`.npmrc` sets `tag-version-prefix=""`).
+The tag triggers `.github/workflows/release.yml`, which tests, builds, signs the provenance of
+`main.js`, `manifest.json` and `styles.css` (GitHub artifact attestations), and publishes the GitHub
+release automatically — no manual step. The tag must equal the version, with no `v` prefix (`.npmrc`
+sets `tag-version-prefix=""`).
 
 ## License
 

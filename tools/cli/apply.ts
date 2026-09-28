@@ -4,9 +4,11 @@
  * "预览之后是否被外部改动"比对的是**内容**，不是 (mtime, size)：只动了时间戳的文件照常写入。
  */
 
-// Node 内置模块用顶层 await 的动态 import 加载（同上，本文件不进插件包）
-const { dirname, join } = await import("node:path");
-const { existsSync, mkdirSync, readFileSync, renameSync } = await import("node:fs");
+// Node 内置模块经 process.getBuiltinModule 获取（需 Node ≥ 22.3）：本文件只被
+// Node CLI / 测试引用，插件包 main.js 不含此文件；不写成 import 语句，社区目录的
+// 静态扫描由此可确认插件代码与 Node API 零接触。
+const path = process.getBuiltinModule("node:path");
+const fs = process.getBuiltinModule("node:fs");
 import type { PlanOutput } from "../../src/core/engine.ts";
 import type { Settings } from "../../src/core/settings.ts";
 import { protectionOk } from "../../src/core/verify.ts";
@@ -45,7 +47,7 @@ export function applyPlan(
   const toWrite: string[] = [];
   for (const rel of plan.changedDocs) {
     const orig = plan.originals.get(rel);
-    const now = readTextOrNull(join(vaultRoot, rel));
+    const now = readTextOrNull(path.join(vaultRoot, rel));
     if (!s.safety.skipIfChanged || now === orig) toWrite.push(rel);
     else res.skippedChanged.push(rel);
   }
@@ -53,25 +55,25 @@ export function applyPlan(
   // ---- 写正文（按原文件的换行风格写回；原始字节留着回滚用）
   const raws = new Map<string, string>();
   for (const rel of toWrite) {
-    const raw = readFileSync(join(vaultRoot, rel), "utf8");
+    const raw = fs.readFileSync(path.join(vaultRoot, rel), "utf8");
     raws.set(rel, raw);
-    writeTextAtomic(join(vaultRoot, rel), withOriginalEol(plan.writes.get(rel) as string, raw));
+    writeTextAtomic(path.join(vaultRoot, rel), withOriginalEol(plan.writes.get(rel) as string, raw));
     res.written.push(rel);
   }
 
   // ---- 写 MOC
   for (const [mp, ch] of plan.mocChanges) {
-    writeTextAtomic(join(vaultRoot, mp), ch.new);
+    writeTextAtomic(path.join(vaultRoot, mp), ch.new);
     res.writtenMoc.push(mp);
   }
 
   // ---- 不再生成的旧索引页：计划之后被改过就不动
   for (const [mp, planned] of plan.mocRemovals) {
-    if (readTextOrNull(join(vaultRoot, mp)) !== planned) continue;
-    let dst = join(vaultRoot, ".trash", mp);
-    for (let i = 2; existsSync(dst); i++) dst = join(vaultRoot, ".trash", mp.replace(/\.md$/, ` ${i}.md`));
-    mkdirSync(dirname(dst), { recursive: true });
-    renameSync(join(vaultRoot, mp), dst);
+    if (readTextOrNull(path.join(vaultRoot, mp)) !== planned) continue;
+    let dst = path.join(vaultRoot, ".trash", mp);
+    for (let i = 2; fs.existsSync(dst); i++) dst = path.join(vaultRoot, ".trash", mp.replace(/\.md$/, ` ${i}.md`));
+    fs.mkdirSync(path.dirname(dst), { recursive: true });
+    fs.renameSync(path.join(vaultRoot, mp), dst);
     res.removedMoc.push(mp);
   }
 
@@ -79,7 +81,7 @@ export function applyPlan(
   if (s.safety.verifyStrippedBytes) {
     for (const rel of toWrite) {
       const orig = plan.originals.get(rel) as string;
-      const now = readTextOrNull(join(vaultRoot, rel));
+      const now = readTextOrNull(path.join(vaultRoot, rel));
       if (now === null) continue;
       if (protectionOk(orig, now, s)) continue;
       // 我们写完又被外部改了？→ 保留现场；否则是我们自己的问题 → 恢复
@@ -88,7 +90,7 @@ export function applyPlan(
         res.protectionExternal.push(rel);
       } else {
         res.protectionFailed.push(rel);
-        writeTextAtomic(join(vaultRoot, rel), raws.get(rel) as string);
+        writeTextAtomic(path.join(vaultRoot, rel), raws.get(rel) as string);
         res.restored.push(rel);
       }
     }

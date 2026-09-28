@@ -20,9 +20,10 @@ jobs:
         with:
           node-version: 24
 
-      - name: Install and build
+      - name: Install, test and build
         run: |
           npm ci
+          npm test
           npm run build
 
       - name: Attest release assets

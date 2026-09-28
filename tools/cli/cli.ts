@@ -8,9 +8,11 @@
  * --config 可以直接用插件保存的配置（data.json，位于 vault 的 Obsidian 配置目录下 plugins/vault-linker-auto/）。
  */
 
-// Node 内置模块用顶层 await 的动态 import 加载（本文件不进插件包，见 vaultFs.ts 头注释）
-const { join, resolve } = await import("node:path");
-const { readFileSync, writeFileSync, readdirSync, existsSync } = await import("node:fs");
+// Node 内置模块经 process.getBuiltinModule 获取（需 Node ≥ 22.3）：本文件只被
+// Node CLI / 测试引用，插件包 main.js 不含此文件；不写成 import 语句，社区目录的
+// 静态扫描由此可确认插件代码与 Node API 零接触。
+const path = process.getBuiltinModule("node:path");
+const fs = process.getBuiltinModule("node:fs");
 
 /** CLI 输出走 stdout（不等同于插件里的 console 日志，本文件不被插件加载） */
 const out = (line: string): void => {
@@ -44,7 +46,7 @@ function parseArgs(argv: readonly string[]): Args {
     process.exit(2);
   }
   return {
-    vault: resolve(vault),
+    vault: path.resolve(vault),
     preset: get("--preset") ?? "generic",
     apply: argv.includes("--apply"),
     today: get("--today") ?? todayIso(),
@@ -55,7 +57,7 @@ function parseArgs(argv: readonly string[]): Args {
 }
 
 function loadSettings(preset: string, config: string | null): Settings {
-  if (config) return mergeSettings(defaultSettings(), JSON.parse(readFileSync(config, "utf8")));
+  if (config) return mergeSettings(defaultSettings(), JSON.parse(fs.readFileSync(config, "utf8")));
   const p = PRESETS[preset];
   if (!p) {
     console.error(`未知预设: ${preset}（可选: ${Object.keys(PRESETS).join(", ")}）`);
@@ -71,13 +73,13 @@ function loadSettings(preset: string, config: string | null): Settings {
 function findConfigDir(vault: string): string | null {
   let entries: string[];
   try {
-    entries = readdirSync(vault);
+    entries = fs.readdirSync(vault);
   } catch {
     return null;
   }
   for (const name of entries) {
     try {
-      if (existsSync(join(vault, name, "app.json"))) return name;
+      if (fs.existsSync(path.join(vault, name, "app.json"))) return name;
     } catch {
       // 非目录或不可读，跳过
     }
@@ -91,7 +93,7 @@ export function runCli(args: Args): { plan: PlanOutput; applied: ReturnType<type
   const configDir = findConfigDir(args.vault);
   const s = withRuntimeExcludes(
     loadSettings(args.preset, args.config),
-    configDir === null ? [] : templatePaths((rel) => readTextOrNull(join(args.vault, rel)), configDir),
+    configDir === null ? [] : templatePaths((rel) => readTextOrNull(path.join(args.vault, rel)), configDir),
   );
   // `language: auto` → 按环境语言选内置文案（插件端传 Obsidian 的语言）
   applyAutoTexts(s, process.env.LC_ALL ?? process.env.LC_MESSAGES ?? process.env.LANG);
@@ -101,13 +103,13 @@ export function runCli(args: Args): { plan: PlanOutput; applied: ReturnType<type
   const mocContents = new Map<string, string>();
   for (const f of allFiles) {
     if (!f.startsWith(mocPrefix) || !f.endsWith(".md")) continue;
-    const t = readTextOrNull(join(args.vault, f));
+    const t = readTextOrNull(path.join(args.vault, f));
     if (t !== null) mocContents.set(f, t);
   }
 
   const plan = planFromFiles(
     allFiles,
-    (rel) => readTextOrNull(join(args.vault, rel)),
+    (rel) => readTextOrNull(path.join(args.vault, rel)),
     s,
     args.today,
     mocContents,
@@ -119,7 +121,7 @@ export function runCli(args: Args): { plan: PlanOutput; applied: ReturnType<type
   }
 
   if (args.reportJson) {
-    writeFileSync(args.reportJson, JSON.stringify({ report: plan.report, writes: [...plan.writes.keys()] }, null, 2));
+    fs.writeFileSync(args.reportJson, JSON.stringify({ report: plan.report, writes: [...plan.writes.keys()] }, null, 2));
   }
 
   const applied = args.apply ? applyPlan(args.vault, plan, s) : null;
