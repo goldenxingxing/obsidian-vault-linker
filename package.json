@@ -1,7 +1,7 @@
 {
   "name": "obsidian-vault-linker",
-  "version": "0.1.0",
-  "description": "Build an index page for each area of your vault and a ranked list of related notes at the end of each note, in plain Markdown, without touching your own text.",
+  "version": "0.2.0",
+  "description": "Automatically adds links to related notes at the end of each note and an index page for each folder, in plain Markdown, without touching your own text.",
   "private": true,
   "type": "module",
   "license": "MIT",
