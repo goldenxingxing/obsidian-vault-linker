@@ -101,22 +101,12 @@ export function planRun(input: EngineInput): PlanOutput {
   }
 }
 
-/** 异步跑：每处理 YIELD_EVERY 篇让出一次主线程。结果与 planRun 完全相同 */
-export async function planRunAsync(input: EngineInput): Promise<PlanOutput> {
-  const it = planSteps(input);
-  // window.setTimeout keeps timers in the right scope for Obsidian popout windows;
-  // fall back to globalThis for the Node CLI and tests.
-  const defer: (cb: () => void) => unknown =
-    typeof window !== "undefined" ? (cb) => window.setTimeout(cb, 0) : (cb) => setTimeout(cb, 0);
-  for (;;) {
-    const r = it.next();
-    if (r.done) return r.value;
-    await new Promise<void>((resolve) => defer(resolve));
-  }
-}
-
-/** 引擎本体：生成器，在耗时的逐篇循环里 yield（不改变任何计算） */
-function* planSteps(input: EngineInput): Generator<void, PlanOutput, void> {
+/**
+ * 引擎本体：生成器，在耗时的逐篇循环里 yield（不改变任何计算）。
+ * 异步驱动（window.setTimeout，弹窗窗口作用域正确）在 obsidian/runner.ts，
+ * Node 侧驱动在 tools/cli 与 tests 各自实现，本文件不碰任何定时器。
+ */
+export function* planSteps(input: EngineInput): Generator<void, PlanOutput, void> {
   const s = input.settings;
   // 其他插件的数据文件（Excalidraw、Kanban）不当笔记处理：不写入，也不参与互链
   const pluginFiles = s.scan.skipPluginFiles

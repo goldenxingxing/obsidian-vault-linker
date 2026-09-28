@@ -658,14 +658,22 @@ test("EntityIndex 与逐个正则匹配结果一致（大小写折叠特例、�
   }
 });
 
-test("planRunAsync 与 planRun 结果相同（让出主线程不改变计算）", async () => {
-  const { planRunAsync } = await import("../src/core/engine.ts");
+test("异步驱动与 planRun 结果相同（让出主线程不改变计算）", async () => {
+  const { planSteps } = await import("../src/core/engine.ts");
+  const drive = async (input: Parameters<typeof planSteps>[0]) => {
+    const it = planSteps(input);
+    for (;;) {
+      const r = it.next();
+      if (r.done) return r.value;
+      await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    }
+  };
   const s = defaultSettings();
   const contents = new Map<string, string>();
   for (let i = 0; i < 450; i++) contents.set(`N/n${i}.md`, `# 笔记${i}\n\n提到 笔记${(i * 7) % 450} 和 笔记${(i * 13) % 450}\n`);
   const input = { settings: s, today: TODAY, allFiles: [...contents.keys()], contents };
   const a = planRun(input);
-  const b = await planRunAsync(input);
+  const b = await drive(input);
   assert.deepEqual([...b.newContents], [...a.newContents]);
   assert.deepEqual([...b.mocChanges], [...a.mocChanges]);
 });

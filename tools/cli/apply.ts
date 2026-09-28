@@ -4,11 +4,12 @@
  * "预览之后是否被外部改动"比对的是**内容**，不是 (mtime, size)：只动了时间戳的文件照常写入。
  */
 
-import { dirname, join } from "node:path";
+// Node 内置模块用顶层 await 的动态 import 加载（同上，本文件不进插件包）
+const { dirname, join } = await import("node:path");
+const { existsSync, mkdirSync, readFileSync, renameSync } = await import("node:fs");
 import type { PlanOutput } from "../../src/core/engine.ts";
 import type { Settings } from "../../src/core/settings.ts";
 import { protectionOk } from "../../src/core/verify.ts";
-import { existsSync, mkdirSync, readFileSync, renameSync } from "node:fs";
 import { withOriginalEol } from "../../src/core/text.ts";
 import { readTextOrNull, writeTextAtomic } from "./vaultFs.ts";
 

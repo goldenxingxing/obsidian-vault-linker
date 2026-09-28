@@ -5,11 +5,17 @@
  * 用法：
  *   node tools/cli/cli.ts --vault <vault路径> [--preset generic | --config <data.json>] [--apply]
  *                   [--today YYYY-MM-DD] [--report-json <文件>] [--quiet]
- * --config 可以直接用插件保存的配置：<vault>/.obsidian/plugins/vault-linker-auto/data.json
+ * --config 可以直接用插件保存的配置（data.json，位于 vault 的 Obsidian 配置目录下 plugins/vault-linker-auto/）。
  */
 
-import { join, resolve } from "node:path";
-import { readFileSync, writeFileSync } from "node:fs";
+// Node 内置模块用顶层 await 的动态 import 加载（本文件不进插件包，见 vaultFs.ts 头注释）
+const { join, resolve } = await import("node:path");
+const { readFileSync, writeFileSync, readdirSync, existsSync } = await import("node:fs");
+
+/** CLI 输出走 stdout（不等同于插件里的 console 日志，本文件不被插件加载） */
+const out = (line: string): void => {
+  process.stdout.write(line + "\n");
+};
 import { planFromFiles, type PlanOutput } from "../../src/core/engine.ts";
 import { PRESETS, applyAutoTexts, defaultSettings, mergeSettings, todayIso, type Settings } from "../../src/core/settings.ts";
 import { ensureDomains, templatePaths, withRuntimeExcludes } from "../../src/core/scope.ts";
@@ -58,12 +64,34 @@ function loadSettings(preset: string, config: string | null): Settings {
   return p.build();
 }
 
+/**
+ * Obsidian 的配置目录可被用户自定义、名字不固定，所以不写死：
+ * 在 vault 根下找包含 app.json 的目录；找不到就跳过模板目录探测。
+ */
+function findConfigDir(vault: string): string | null {
+  let entries: string[];
+  try {
+    entries = readdirSync(vault);
+  } catch {
+    return null;
+  }
+  for (const name of entries) {
+    try {
+      if (existsSync(join(vault, name, "app.json"))) return name;
+    } catch {
+      // 非目录或不可读，跳过
+    }
+  }
+  return null;
+}
+
 export function runCli(args: Args): { plan: PlanOutput; applied: ReturnType<typeof applyPlan> | null } {
   const allFiles = listAllFiles(args.vault);
   // 本次运行实际生效的配置：排除 Obsidian 配置里的模板目录（不改预设本身）
+  const configDir = findConfigDir(args.vault);
   const s = withRuntimeExcludes(
     loadSettings(args.preset, args.config),
-    templatePaths((rel) => readTextOrNull(join(args.vault, rel)), ".obsidian"),
+    configDir === null ? [] : templatePaths((rel) => readTextOrNull(join(args.vault, rel)), configDir),
   );
   // `language: auto` → 按环境语言选内置文案（插件端传 Obsidian 的语言）
   applyAutoTexts(s, process.env.LC_ALL ?? process.env.LC_MESSAGES ?? process.env.LANG);
@@ -87,7 +115,7 @@ export function runCli(args: Args): { plan: PlanOutput; applied: ReturnType<type
 
   if (!args.quiet) printReport(plan, s, args.apply);
   if (domainsDetected && !args.quiet) {
-    console.log(`（domains 为空，已按顶层目录自动探测出 ${s.domains.length} 个领域）`);
+    out(`（domains 为空，已按顶层目录自动探测出 ${s.domains.length} 个领域）`);
   }
 
   if (args.reportJson) {
@@ -96,21 +124,21 @@ export function runCli(args: Args): { plan: PlanOutput; applied: ReturnType<type
 
   const applied = args.apply ? applyPlan(args.vault, plan, s) : null;
   if (applied && !args.quiet) {
-    console.log(
+    out(
       `APPLY 完成：写入正文 ${applied.written.length} 篇（跳过快照后变更 ${applied.skippedChanged.length} 篇），` +
       `写入 MOC ${applied.writtenMoc.length} 个，旧索引页移入 .trash ${applied.removedMoc.length} 个。`,
     );
     if (applied.skippedChanged.length > 0) {
-      console.log("!! 跳过（写前内容已变）：" + applied.skippedChanged.slice(0, 20).join(", "));
+      out("!! 跳过（写前内容已变）：" + applied.skippedChanged.slice(0, 20).join(", "));
     }
     if (applied.protectionExternal.length > 0) {
-      console.log(`!! 校验失败但系写入后外部又修改（保留现场）${applied.protectionExternal.length} 篇`);
+      out(`!! 校验失败但系写入后外部又修改（保留现场）${applied.protectionExternal.length} 篇`);
     }
     if (applied.protectionFailed.length > 0) {
-      console.log(`!! 内容保护校验失败 ${applied.protectionFailed.length} 篇，已恢复：${applied.restored.slice(0, 20).join(", ")}`);
+      out(`!! 内容保护校验失败 ${applied.protectionFailed.length} 篇，已恢复：${applied.restored.slice(0, 20).join(", ")}`);
     }
     if (applied.protectionFailed.length === 0 && applied.protectionExternal.length === 0) {
-      console.log(`内容保护校验: PASS（${applied.written.length} 篇剥离托管区块后与原文逐字节一致）`);
+      out(`内容保护校验: PASS（${applied.written.length} 篇剥离托管区块后与原文逐字节一致）`);
     }
   }
   return { plan, applied };
@@ -118,23 +146,23 @@ export function runCli(args: Args): { plan: PlanOutput; applied: ReturnType<type
 
 function printReport(plan: PlanOutput, s: Settings, applyMode: boolean): void {
   const r = plan.report;
-  console.log("=".repeat(60));
-  console.log("模式: " + (applyMode ? "APPLY" : "DRY-RUN"));
-  console.log(`扫描 .md（vault 全量 walk）: ${r.scanned} 在范围 + ${r.excluded} 排除`);
-  if (r.skippedBinary > 0) console.log(`跳过（非 UTF-8）: ${r.skippedBinary}`);
-  console.log("领域分布: " + r.domains.map((d) => `${d.name}=${d.count}`).join(", "));
-  console.log(`计划修改文档: ${r.plannedChanges} / ${r.scanned}`);
-  console.log(`计划新建/更新 MOC: ${r.mocPlanned}`);
+  out("=".repeat(60));
+  out("模式: " + (applyMode ? "APPLY" : "DRY-RUN"));
+  out(`扫描 .md（vault 全量 walk）: ${r.scanned} 在范围 + ${r.excluded} 排除`);
+  if (r.skippedBinary > 0) out(`跳过（非 UTF-8）: ${r.skippedBinary}`);
+  out("领域分布: " + r.domains.map((d) => `${d.name}=${d.count}`).join(", "));
+  out(`计划修改文档: ${r.plannedChanges} / ${r.scanned}`);
+  out(`计划新建/更新 MOC: ${r.mocPlanned}`);
   if (r.mocConflicts.length > 0) {
-    console.log(`!! 跳过 ${r.mocConflicts.length} 个同名文件（位置已有不是本插件生成的文件，或只差大小写，未覆盖）: ${r.mocConflicts.slice(0, 10).join(", ")}`);
+    out(`!! 跳过 ${r.mocConflicts.length} 个同名文件（位置已有不是本插件生成的文件，或只差大小写，未覆盖）: ${r.mocConflicts.slice(0, 10).join(", ")}`);
   }
-  console.log(`自动互链总数: ${r.autoLinkTotal}（${s.related.blockTag} 条目）`);
-  console.log(`实体总数: ${r.entityUsage.length}（未命中 ${r.unusedEntities.length}，过泛 ${r.tooBroadEntities.length}）`);
-  for (const w of [...new Set(r.warnings)].sort()) console.log("WARNING: " + w);
-  console.log(`链接有效性: 托管区块/MOC 内失效链接 ${r.brokenManaged.length} 个；正文既有失效链接 ${r.brokenPreexist.length} 个`);
-  for (const [f, t] of r.brokenManaged.slice(0, 10)) console.log(`   [managed-broken] ${f} -> [[${t}]]`);
-  for (const [f, t] of r.brokenPreexist.slice(0, 10)) console.log(`   [preexist-broken] ${f} -> [[${t}]]`);
-  console.log("=".repeat(60));
+  out(`自动互链总数: ${r.autoLinkTotal}（${s.related.blockTag} 条目）`);
+  out(`实体总数: ${r.entityUsage.length}（未命中 ${r.unusedEntities.length}，过泛 ${r.tooBroadEntities.length}）`);
+  for (const w of [...new Set(r.warnings)].sort()) out("WARNING: " + w);
+  out(`链接有效性: 托管区块/MOC 内失效链接 ${r.brokenManaged.length} 个；正文既有失效链接 ${r.brokenPreexist.length} 个`);
+  for (const [f, t] of r.brokenManaged.slice(0, 10)) out(`   [managed-broken] ${f} -> [[${t}]]`);
+  for (const [f, t] of r.brokenPreexist.slice(0, 10)) out(`   [preexist-broken] ${f} -> [[${t}]]`);
+  out("=".repeat(60));
 }
 
 if (process.argv[1] && process.argv[1].endsWith("cli.ts")) {

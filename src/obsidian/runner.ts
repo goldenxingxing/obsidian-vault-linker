@@ -14,7 +14,7 @@
 
 import { t } from "./i18n.ts";
 import type { App, TFile } from "obsidian";
-import { planRunAsync, type EngineInput, type PlanOutput } from "../core/engine.ts";
+import { planSteps, type EngineInput, type PlanOutput } from "../core/engine.ts";
 import { collectInScope, ensureDomains, templatePaths, withRuntimeExcludes } from "../core/scope.ts";
 import { safeDirPath } from "../core/moc.ts";
 import { pyUniversalNewlines } from "../core/pycompat.ts";
@@ -147,7 +147,20 @@ export async function effectiveSettings(app: AppLike, s: Settings): Promise<Sett
 export async function planVault(app: AppLike, s: Settings, today: string): Promise<PlanOutput> {
   const run = { ...s };
   ensureDomains(run, app.vault.getFiles().map((f) => f.path));
-  return planRunAsync(await buildEngineInput(app, run, today));
+  return drivePlan(await buildEngineInput(app, run, today));
+}
+
+/**
+ * 异步驱动生成器：每处理 YIELD_EVERY 篇让出一次主线程。结果与 planRun 完全相同。
+ * 用 window.setTimeout 而非裸 setTimeout，保证计时器挂在当前（含 popout）窗口上。
+ */
+export async function drivePlan(input: EngineInput): Promise<PlanOutput> {
+  const it = planSteps(input);
+  for (;;) {
+    const r = it.next();
+    if (r.done) return r.value;
+    await new Promise<void>((resolve) => window.setTimeout(resolve, 0));
+  }
 }
 
 /** 为 E4 候选发现准备文档集（标题 / tags / 正文） */

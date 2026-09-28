@@ -7,18 +7,36 @@
  *   - 写盘用"同目录临时文件 + rename"（原子写）
  */
 
-import {
-  readdirSync, readFileSync, writeFileSync, renameSync, mkdirSync,
-  statSync, existsSync, rmSync, cpSync, type Dirent,
-} from "node:fs";
-import { join, dirname, relative, sep } from "node:path";
+// Node 内置模块用顶层 await 的动态 import 加载：
+// 本文件只被 Node CLI / 测试引用（插件包 main.js 不含此文件），
+// 动态 import 是官方认可的 Node API 取用方式（见社区目录扫描建议）。
+const fs = await import("node:fs");
+const path = await import("node:path");
+type Dirent = import("node:fs").Dirent;
+// 具名解构会丢失重载签名，重载函数用显式类型收窄
+const readdirSync = fs.readdirSync as (p: string, opts: { withFileTypes: true }) => Dirent[];
+const readFileSync = fs.readFileSync as {
+  (p: string, encoding: "utf8"): string;
+  (p: string): Buffer;
+};
+const writeFileSync = fs.writeFileSync;
+const renameSync = fs.renameSync;
+const mkdirSync = fs.mkdirSync;
+const statSync = fs.statSync;
+const existsSync = fs.existsSync;
+const rmSync = fs.rmSync;
+const cpSync = fs.cpSync;
+const join = path.join;
+const dirname = path.dirname;
+const relative = path.relative;
+const sep = path.sep;
 import { pyUniversalNewlines } from "../../src/core/pycompat.ts";
 
 /** 递归列出 vault 内全部文件（相对路径，POSIX 分隔符），跳过 .git */
 export function listAllFiles(vaultRoot: string): string[] {
   const out: string[] = [];
   const walk = (dir: string): void => {
-    let entries;
+    let entries: Dirent[];
     try {
       entries = readdirSync(dir, { withFileTypes: true });
     } catch {
@@ -81,7 +99,7 @@ export function rmrf(p: string): void {
   rmSync(p, { recursive: true, force: true });
 }
 
-/** 复制 vault 副本（排除指定名字的目录/文件，如 .git / .tools / .obsidian / .sesa） */
+/** 复制 vault 副本（排除指定名字的目录/文件，如 VCS 与工具目录、Obsidian 配置目录、缓存目录） */
 export function copyVault(src: string, dst: string, skipNames: readonly string[]): void {
   const skip = new Set(skipNames);
   const walk = (rel: string): void => {
