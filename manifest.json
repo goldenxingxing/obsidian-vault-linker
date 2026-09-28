@@ -1,7 +1,7 @@
 {
-  "id": "vault-linker",
-  "name": "Vault Linker",
-  "version": "0.2.0",
+  "id": "vault-linker-auto",
+  "name": "Vault Linker Auto",
+  "version": "0.2.1",
   "minAppVersion": "1.5.0",
   "description": "Automatically adds links to related notes at the end of each note and an index page for each folder, in plain Markdown, without touching your own text.",
   "author": "qunwei",

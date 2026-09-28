@@ -1,4 +1,4 @@
-# Vault Linker
+# Vault Linker Auto
 
 English · [中文](README.zh.md)
 
@@ -82,9 +82,9 @@ The plugin is not in the community plugin list yet.
 
 1. Download `main.js`, `manifest.json` and `styles.css` from the
    [latest release](https://github.com/goldenxingxing/obsidian-vault-linker/releases/latest).
-2. Put both in `<your vault>/.obsidian/plugins/vault-linker/`. (`.obsidian` is a hidden folder; in the macOS
+2. Put both in `<your vault>/.obsidian/plugins/vault-linker-auto/`. (`.obsidian` is a hidden folder; in the macOS
    Finder press `⌘ ⇧ .` to show it.)
-3. In Obsidian: **Settings → Community plugins → Installed plugins → enable Vault Linker**.
+3. In Obsidian: **Settings → Community plugins → Installed plugins → enable Vault Linker Auto**.
 
 **With BRAT** (updates automatically): install the [BRAT](https://github.com/TfTHacker/obsidian42-brat) plugin,
 choose **Add beta plugin**, and enter `goldenxingxing/obsidian-vault-linker`.
@@ -95,7 +95,7 @@ choose **Add beta plugin**, and enter `goldenxingxing/obsidian-vault-linker`.
 
 After you enable it, the plugin **changes nothing on its own**.
 
-1. Open **Settings → Vault Linker**.
+1. Open **Settings → Vault Linker Auto**.
 2. Click **Preview** to see what it would change; nothing is written.
 3. If you like the result, click **Update links**.
 4. To keep links up to date as you write, turn on **Update automatically**, and choose how long to wait after
@@ -107,7 +107,7 @@ including folders you create later. Finer options (scoring, generated text, timi
 defaults and live in the settings JSON: **Export**, edit, **Import**.
 
 The report after each run lists what changed, what was skipped and why. Every run is also appended to
-`.obsidian/plugins/vault-linker/vault-linker.log`.
+`.obsidian/plugins/vault-linker-auto/vault-linker.log`.
 
 ## Safety
 
@@ -167,8 +167,8 @@ a topic. On large vaults with automatic runs, a longer quiet period in the setti
 A command-line version runs the same engine without Obsidian:
 
 ```bash
-node src/cli.ts --vault <vault> --config <vault>/.obsidian/plugins/vault-linker/data.json          # preview
-node src/cli.ts --vault <vault> --config <vault>/.obsidian/plugins/vault-linker/data.json --apply  # write
+node src/cli.ts --vault <vault> --config <vault>/.obsidian/plugins/vault-linker-auto/data.json          # preview
+node src/cli.ts --vault <vault> --config <vault>/.obsidian/plugins/vault-linker-auto/data.json --apply  # write
 ```
 
 ## Settings you can share

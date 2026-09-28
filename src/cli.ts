@@ -5,7 +5,7 @@
  * 用法：
  *   node src/cli.ts --vault <vault路径> [--preset generic | --config <data.json>] [--apply]
  *                   [--today YYYY-MM-DD] [--report-json <文件>] [--quiet]
- * --config 可以直接用插件保存的配置：<vault>/.obsidian/plugins/vault-linker/data.json
+ * --config 可以直接用插件保存的配置：<vault>/.obsidian/plugins/vault-linker-auto/data.json
  */
 
 import { join, resolve } from "node:path";

@@ -53,9 +53,9 @@ export default class VaultLinkerPlugin extends Plugin {
 
     if (this.firstRun) {
       new Notice(
-        t("Vault Linker 已启用，它不会自己改动任何文件。打开它的设置点「预览」看看效果；" +
+        t("Vault Linker Auto 已启用，它不会自己改动任何文件。打开它的设置点「预览」看看效果；" +
           "满意就点「更新链接」，想让它一直保持更新，打开「自动更新」。",
-          "Vault Linker is enabled and changes nothing on its own. Open its settings and click Preview to see what it would do. " +
+          "Vault Linker Auto is enabled and changes nothing on its own. Open its settings and click Preview to see what it would do. " +
           "If you like it, click Update links, and turn on Update automatically to keep links current."),
         12000,
       );
@@ -144,7 +144,7 @@ export default class VaultLinkerPlugin extends Plugin {
 
   private updateStatus(): void {
     if (!this.statusEl) return;
-    const parts = ["Vault Linker"];
+    const parts = ["Vault Linker Auto"];
     parts.push(this.lastRunAt ? t(`上次 ${this.lastRunAt}`, `last run ${this.lastRunAt}`) : t("未运行", "not run yet"));
     if (this.pendingCount > 0) parts.push(t(`待处理 ${this.pendingCount}`, `${this.pendingCount} pending`));
     this.statusEl.setText(parts.join(" · "));
@@ -188,7 +188,7 @@ export default class VaultLinkerPlugin extends Plugin {
    */
   async run(mode: "dry-run" | "apply", notify: boolean, auto = false): Promise<readonly string[]> {
     if (this.busy) {
-      if (notify) new Notice(t("Vault Linker 正在运行中，请稍候…", "Vault Linker is already running…"));
+      if (notify) new Notice(t("Vault Linker Auto 正在运行中，请稍候…", "Vault Linker Auto is already running…"));
       return [];
     }
     this.busy = true;

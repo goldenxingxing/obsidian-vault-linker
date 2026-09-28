@@ -1,4 +1,4 @@
-# Vault Linker
+# Vault Linker Auto
 
 [English](README.md) · 中文
 
@@ -75,9 +75,9 @@ Vault Linker 在笔记之上维护一层「链接」：给 vault 的每个领域
 
 1. 在 [最新 Release](https://github.com/goldenxingxing/obsidian-vault-linker/releases/latest)
    下载 `main.js`、`manifest.json` 和 `styles.css`。
-2. 放进 `<你的 vault>/.obsidian/plugins/vault-linker/`（`.obsidian` 是隐藏目录；macOS 访达里按
+2. 放进 `<你的 vault>/.obsidian/plugins/vault-linker-auto/`（`.obsidian` 是隐藏目录；macOS 访达里按
    `⌘ ⇧ .` 显示）。
-3. 在 Obsidian 里：**设置 → 第三方插件 → 已安装插件 → 启用 Vault Linker**。
+3. 在 Obsidian 里：**设置 → 第三方插件 → 已安装插件 → 启用 Vault Linker Auto**。
 
 **用 BRAT 安装**（自动更新）：装好 [BRAT](https://github.com/TfTHacker/obsidian42-brat) 插件，
 选「Add beta plugin」，填 `goldenxingxing/obsidian-vault-linker`。
@@ -88,7 +88,7 @@ Vault Linker 在笔记之上维护一层「链接」：给 vault 的每个领域
 
 启用后插件**不会自动改动任何文件**。
 
-1. 打开 **设置 → Vault Linker**。
+1. 打开 **设置 → Vault Linker Auto**。
 2. 点 **预览**，看它会改什么，这一步不写盘。
 3. 满意后点 **更新链接**。
 4. 想让它随你写作自动更新，打开 **自动更新**，再选停下来多久后更新（30 秒到 1 小时）。
@@ -98,7 +98,7 @@ Vault Linker 在笔记之上维护一层「链接」：给 vault 的每个领域
 都有合适的默认值，放在设置 JSON 里：**导出**、修改、再 **导入**。
 
 每次运行后的报告会列出改了什么、跳过了什么、为什么跳过；每次运行也会追加到
-`.obsidian/plugins/vault-linker/vault-linker.log`。
+`.obsidian/plugins/vault-linker-auto/vault-linker.log`。
 
 ## 安全机制
 
@@ -155,8 +155,8 @@ Vault Linker 在笔记之上维护一层「链接」：给 vault 的每个领域
 同一个引擎也能在 Obsidian 之外用命令行运行：
 
 ```bash
-node src/cli.ts --vault <vault> --config <vault>/.obsidian/plugins/vault-linker/data.json          # 预览
-node src/cli.ts --vault <vault> --config <vault>/.obsidian/plugins/vault-linker/data.json --apply  # 写入
+node src/cli.ts --vault <vault> --config <vault>/.obsidian/plugins/vault-linker-auto/data.json          # 预览
+node src/cli.ts --vault <vault> --config <vault>/.obsidian/plugins/vault-linker-auto/data.json --apply  # 写入
 ```
 
 ## 配置可以分享
