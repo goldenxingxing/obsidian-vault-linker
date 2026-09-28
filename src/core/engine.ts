@@ -104,10 +104,14 @@ export function planRun(input: EngineInput): PlanOutput {
 /** 异步跑：每处理 YIELD_EVERY 篇让出一次主线程。结果与 planRun 完全相同 */
 export async function planRunAsync(input: EngineInput): Promise<PlanOutput> {
   const it = planSteps(input);
+  // window.setTimeout keeps timers in the right scope for Obsidian popout windows;
+  // fall back to globalThis for the Node CLI and tests.
+  const defer: (cb: () => void) => unknown =
+    typeof window !== "undefined" ? (cb) => window.setTimeout(cb, 0) : (cb) => setTimeout(cb, 0);
   for (;;) {
     const r = it.next();
     if (r.done) return r.value;
-    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    await new Promise<void>((resolve) => defer(resolve));
   }
 }
 

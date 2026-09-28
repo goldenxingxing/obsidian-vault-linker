@@ -143,8 +143,7 @@ export class LinkerSettingTab extends PluginSettingTab {
       .addSlider((c) =>
         c.setLimits(0, 20, 1)
           .setValue(this.s.related.enabled ? this.s.related.topN : 0)
-          .setDynamicTooltip()
-          .onChange((v) => {
+        .onChange((v) => {
             this.s.related.enabled = v > 0;
             if (v > 0) this.s.related.topN = v;
             this.save();
