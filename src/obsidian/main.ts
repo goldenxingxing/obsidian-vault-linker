@@ -107,7 +107,7 @@ export default class VaultLinkerPlugin extends Plugin {
   }
 
   async loadSettings(): Promise<void> {
-    const data = await this.loadData();
+    const data: unknown = await this.loadData();
     this.firstRun = data === null || data === undefined;
     this.settings = mergeSettings(defaultSettings(), data);
     // 首次安装：language: auto → 按 Obsidian 的语言选文案，并落盘（下次加载不再是“首次”）

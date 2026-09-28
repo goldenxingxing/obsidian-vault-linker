@@ -9,6 +9,7 @@
 
 import type { EntityRule, Settings } from "./settings.ts";
 import { pyLen, pyReEscape } from "./pycompat.ts";
+import { foldCase } from "./multimatch.ts";
 import { stripAllBlocks } from "./blocks.ts";
 import { bodyWithoutFm, parseFrontmatterTags } from "./frontmatter.ts";
 
@@ -30,20 +31,6 @@ export interface EntityMatcher {
 
 /** 旧版「领域标签」功能写进 frontmatter 的 tag 前缀（功能已移除，笔记里可能还有） */
 const LEGACY_DOMAIN_TAG = "domain/";
-
-/**
- * lookbehind 只在 iOS 16.4+ 才支持（官方移动端指南明确提到这点），
- * 老版本 iOS 上 `new RegExp("(?<!x)")` 会直接抛异常。
- * 所以这里做特性探测：不支持就走等价的手工边界检查回退路径。
- */
-export const LOOKBEHIND_SUPPORTED: boolean = (() => {
-  try {
-    new RegExp("(?<![A-Za-z0-9_])a");
-    return true;
-  } catch {
-    return false;
-  }
-})();
 
 /** 词边界字符集：ASCII 字母、数字、下划线 */
 function isBoundaryWordChar(ch: string | undefined): boolean {
@@ -67,11 +54,9 @@ export function isLatinTerm(term: string): boolean {
 function buildRegex(term: string, rule: Pick<EntityRule, "caseSensitive" | "wordBoundary">): RegExp | null {
   const flags = rule.caseSensitive ? "g" : "gi";
   const esc = pyReEscape(term);
-  if (rule.wordBoundary) {
-    // (?<![A-Za-z0-9_])term(?![A-Za-z0-9_])
-    if (!LOOKBEHIND_SUPPORTED) return null; // 老 iOS：回退到手工边界检查
-    return new RegExp(`(?<![A-Za-z0-9_])${esc}(?![A-Za-z0-9_])`, flags);
-  }
+  // 整词匹配要看命中位置的前一个字符。正则里只能写 lookbehind，而 iOS 16.4 以前不支持
+  // （社区插件审核也不允许），所以整词匹配不用正则，走 matcherFallbackHit
+  if (rule.wordBoundary) return null;
   return new RegExp(esc, flags);
 }
 
@@ -170,10 +155,15 @@ export function stripCode(text: string): string {
     .replace(/`[^`\n]*`/g, " ");
 }
 
-/** 回退路径：纯文本搜索 + 手工边界检查（语义与 lookbehind 正则完全一致） */
-export function matcherFallbackHit(text: string, m: EntityMatcher): boolean {
-  const hay = m.caseSensitive ? text : text.toLowerCase();
-  const needle = m.caseSensitive ? m.needle : m.needle.toLowerCase();
+/**
+ * 整词匹配：纯文本搜索 + 手工边界检查，语义与 `(?<![A-Za-z0-9_])term(?![A-Za-z0-9_])` 加 `i` 标志完全一致。
+ * 忽略大小写用 foldCase（照搬正则 `i` 标志的比较规则，折叠前后长度不变），不用 toLowerCase：
+ * 后者在 ß、İ 这类字符上和正则不一致，还可能改变长度、让边界检查错位。
+ * folded：调用方已折叠好的 text（同一篇文档对多个实体复用）。
+ */
+export function matcherFallbackHit(text: string, m: EntityMatcher, folded?: string): boolean {
+  const hay = m.caseSensitive ? text : (folded ?? foldCase(text));
+  const needle = m.caseSensitive ? m.needle : foldCase(m.needle);
   if (needle === "") return false;
   let i = 0;
   for (;;) {
@@ -202,11 +192,12 @@ export function entityText(content: string, s: Settings): string {
 export function entitiesOf(content: string, matchers: readonly EntityMatcher[], s: Settings): Set<string> {
   const text = entityText(content, s);
   const hits = new Set<string>();
+  let folded: string | undefined;
   for (const m of matchers) {
     if (m.re) {
       m.re.lastIndex = 0;
       if (m.re.test(text)) hits.add(m.term);
-    } else if (matcherFallbackHit(text, m)) {
+    } else if (matcherFallbackHit(text, m, m.caseSensitive ? undefined : (folded ??= foldCase(text)))) {
       hits.add(m.term);
     }
   }

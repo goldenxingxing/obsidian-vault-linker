@@ -50,7 +50,7 @@ export function checkLinks(
     while ((m = LINK_RE.exec(c)) !== null) {
       const target = m[1].trim();
       if (linkOk(target, fileSet, basenameSet)) continue;
-      const managed = inMoc || spans.some(([a, b]) => m !== null && a <= (m.index as number) && (m.index as number) < b);
+      const managed = inMoc || spans.some(([a, b]) => m !== null && a <= m.index && m.index < b);
       (managed ? brokenManaged : brokenPreexist).push([rel, target]);
     }
   }

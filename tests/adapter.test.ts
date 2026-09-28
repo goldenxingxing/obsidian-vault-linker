@@ -28,6 +28,7 @@ const { samplePreset } = await import("./fixture.ts");
 // ---------------------------------------------------------------- 假 vault
 
 class FakeVault {
+  configDir = ".obsidian";
   files = new Map<string, string>();
   dirs = new Set<string>();
   /** process 调用次数（用于验证"跳过"语义） */

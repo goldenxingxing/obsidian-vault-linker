@@ -27,8 +27,8 @@ import type { Settings } from "../core/settings.ts";
 // ---------------------------------------------------------------- 用到的那部分 API
 
 export interface VaultLike {
-  /** 配置目录（通常 `.obsidian`）；假 vault 可不提供 */
-  configDir?: string;
+  /** 配置目录（用户可以改名，不一定是 `.obsidian`） */
+  configDir: string;
   getFiles(): Array<{ path: string; stat?: { mtime: number; size: number } }>;
   getAbstractFileByPath(path: string): unknown;
   readBinary(file: never): Promise<ArrayBuffer>;
@@ -127,7 +127,7 @@ export async function buildEngineInput(app: AppLike, s: Settings, today: string)
 /** 读取 Obsidian 的模板配置，得到本次运行实际生效的配置（排除模板；不落盘） */
 export async function effectiveSettings(app: AppLike, s: Settings): Promise<Settings> {
   if (!s.scan.excludeTemplates) return s;
-  const configDir = app.vault.configDir ?? ".obsidian";
+  const configDir = app.vault.configDir;
   const files = new Map<string, string>();
   for (const rel of ["templates.json", "plugins/templater-obsidian/data.json", "daily-notes.json"]) {
     const p = `${configDir}/${rel}`;

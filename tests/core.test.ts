@@ -30,7 +30,7 @@ import { homePath, isForeignMoc, mocPath, safeDirPath, safeFileName } from "../s
 import { domainsToText, entitiesToText, textToDomains, textToEntities } from "../src/core/config-text.ts";
 import type { DomainRule } from "../src/core/settings.ts";
 import { computeDf, rankRelated } from "../src/core/score.ts";
-import { buildEntityMatchers, entitiesOf, entityText, matcherFallbackHit, LOOKBEHIND_SUPPORTED } from "../src/core/entities.ts";
+import { buildEntityMatchers, entitiesOf, entityText, matcherFallbackHit } from "../src/core/entities.ts";
 
 const Q = samplePreset();
 const TODAY = "2026-09-24";
@@ -264,11 +264,10 @@ test("边界：无尾换行 / 空文件 / 正文含 --- / BOM", () => {
   assert.ok((first.files["eng/bom.md"] as string).includes("\uFEFF"));
 });
 
-test("lookbehind 回退路径与正则路径语义一致（老 iOS 兼容）", () => {
-  assert.equal(LOOKBEHIND_SUPPORTED, true, "Node/桌面端应支持 lookbehind");
+test("整词匹配（不用 lookbehind）与 lookbehind 正则语义一致", () => {
   const cases = [
     "API", "api", "a API b", "x_API_y", "API_x", "x_API", "APIs", "MAPI", "API. 缓存",
-    "a-API-b", "  API  ", "缓存API", "API读数", "（API）", "api\napi", "ACL S", "API_",
+    "a-API-b", "  API  ", "缓存API", "API读数", "（API）", "api\napi", "ACL S", "API_", "ΑPI", "İAPI", "straße API",
   ];
   const rules = [
     { caseSensitive: false, wordBoundary: true },
@@ -281,8 +280,10 @@ test("lookbehind 回退路径与正则路径语义一致（老 iOS 兼容）", (
     s.entities.fromTags = false;
     s.entities.manual = [{ term: "API", aliases: [], weight: 1, ...rule }];
     const [m] = buildEntityMatchers(s, []);
-    assert.ok(m.re, "带 wordBoundary 的规则应有正则快路径");
-    const re = m.re as RegExp;
+    // 对照组：测试里可以用 lookbehind（插件代码不能）
+    const re = rule.wordBoundary
+      ? new RegExp("(?<![A-Za-z0-9_])API(?![A-Za-z0-9_])", rule.caseSensitive ? "g" : "gi")
+      : (m.re as RegExp);
     for (const text of cases) {
       re.lastIndex = 0;
       const viaRegex = re.test(text);

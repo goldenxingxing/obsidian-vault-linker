@@ -429,7 +429,7 @@ function mergeOneLevel(base: Record<string, unknown>, saved: Record<string, unkn
     }
     // 标量/数组：类型不符就保留默认值。数值额外要求有限，
     // 否则 NaN 会让定时器满速空转（setInterval(NaN)）
-    if (typeof v === typeof b && !(typeof b === "number" && !Number.isFinite(v as number))) out[key] = v;
+    if (typeof v === typeof b && !(typeof b === "number" && !Number.isFinite(v))) out[key] = v;
   }
   return out;
 }

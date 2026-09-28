@@ -69,9 +69,8 @@ export class JsonConfigModal extends Modal {
       });
     } else {
       const btn = row.createEl("button", { text: t("复制", "Copy") });
-      btn.addEventListener("click", async () => {
-        await navigator.clipboard.writeText(ta.value);
-        btn.setText(t("已复制", "Copied"));
+      btn.addEventListener("click", () => {
+        void navigator.clipboard.writeText(ta.value).then(() => btn.setText(t("已复制", "Copied")));
       });
     }
     const cancel = row.createEl("button", { text: t("关闭", "Close") });

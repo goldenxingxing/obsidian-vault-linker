@@ -45,7 +45,8 @@ export function pyLstripQuoteSpace(s: string): string {
 /** 等价于 Python `len(s)`：按 code point 计数。 */
 export function pyLen(s: string): number {
   let n = 0;
-  for (const _ of s) n++;
+  const it = s[Symbol.iterator]();
+  while (!it.next().done) n++;
   return n;
 }
 
@@ -83,6 +84,7 @@ export function pyCompare(a: string, b: string): number {
 }
 
 /** Python 的行边界集合（str.splitlines）：\n \r \r\n \v \f \x1c \x1d \x1e \x85 \u2028 \u2029 */
+// eslint-disable-next-line no-control-regex -- \x1c-\x1e 正是 Python 认的行边界，必须照抄
 const LINE_BREAK_RE = /\r\n|[\n\r\v\f\x1c\x1d\x1e\x85\u2028\u2029]/;
 
 /** 等价于 Python `s.splitlines()`（注意：末尾空行不产生额外元素，与 split 不同）。 */
@@ -116,7 +118,7 @@ export function pyBasename(rel: string): string {
 
 /** 等价于 Python `re.escape`（Python 3.7+ 只转义 ASCII 非字母数字以外的特殊字符）。 */
 export function pyReEscape(s: string): string {
-  return s.replace(/[\\^$*+?.()|[\]{}[\]\-]/g, (c) => "\\" + c);
+  return s.replace(/[\\^$*+?.()|[\]{}-]/g, (c) => "\\" + c);
 }
 
 /**
