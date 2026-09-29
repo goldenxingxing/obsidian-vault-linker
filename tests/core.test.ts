@@ -165,6 +165,9 @@ test("summaryOf 列表项去标记、行内标记转纯文本", () => {
   assert.equal(summaryOf("1.5 倍\n", Q), "1.5 倍");
   // 整行只有标记 → 继续往后找，别返回空摘要
   assert.equal(summaryOf("# 标题\n\n*\n**\n正文。\n", Q), "正文。");
+  // 粗体 / 删除线不用 lookbehind 实现（iOS 16.4 之前不支持），相邻的标记也要逐个去掉
+  assert.equal(summaryOf("**a** 和 **b**\n", Q), "a 和 b");
+  assert.equal(summaryOf("**a****b**\n", Q), "ab");
 });
 
 test("summaryOf 按 code point 截断（不是 UTF-16）", () => {

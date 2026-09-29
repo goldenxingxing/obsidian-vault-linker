@@ -36,14 +36,63 @@ const LIST_MARKER_RE = new RegExp(`^(?:[-*+]|\\d{1,9}[.)])[${PY_WS_CLASS}]+`);
 /** 整行只有列表标记（`*`、`**` 这种没有内容的空要点）→ 不是摘要 */
 const MARKERS_ONLY_RE = /^[-*+]+$/;
 
-/** 粗体标记；`__` 不处理——`__init__` 这类标识符会被误伤 */
-const BOLD_RE = /(?<!\w)\*\*(?=\S)([\s\S]*?)(?<=\S)\*\*(?!\w)/g;
+/**
+ * 去掉成对的强调标记（`**` / `~~`），只保留内容。
+ *
+ * 不用 lookbehind：iOS 16.4 之前的 JavaScriptCore 不支持，打包产物会被社区版的
+ * 静态扫描拦下来（解析期直接 SyntaxError，插件整个加载不出来），
+ * 改成手工边界检查——和 entities.ts 的 matcherFallbackHit 同一套路。
+ *
+ * 语义与原来的两条正则完全一致，包括它们的「宽松」之处：
+ *   粗体   ：前一字符不能是 \w；** 后紧跟非空白；内容到下一个 ** 为止，且那个 ** 前不是空白；闭标记后不能是 \w
+ *   删除线 ：同上，但前后不加 \w 限制
+ * 闭标记的搜索起点是开标记的正后方，所以 `****`（空内容）也算一对；
+ * 开标记的 `(?=\S)` 只在开标记成立时检查，之后就不再回头重查。
+ */
+function stripPairs(s: string, mark: string, wordGuard: boolean): string {
+  const n = s.length;
+  const mlen = mark.length;
+  const isWord = (ch: string | undefined): boolean =>
+    !!ch && ((ch >= "a" && ch <= "z") || (ch >= "A" && ch <= "Z") || (ch >= "0" && ch <= "9") || ch === "_");
+  let out = "";
+  let last = 0;   // 输出游标：原文里尚未写进 out 的位置
+  let i = 0;      // 搜索游标（匹配失败时往前推，不能动 last）
+  for (;;) {
+    const at = s.indexOf(mark, i);
+    if (at < 0) break;
+    const before = at > 0 ? s[at - 1] : undefined;  // 字符串开头算通过
+    const openOk = !wordGuard || !isWord(before);
+    const bodyStart = at + mlen;
+    const bodyOk = bodyStart < n && !/\s/.test(s[bodyStart]);
+    if (!openOk || !bodyOk) {
+      i = at + 1;
+      continue;
+    }
+    let end = -1;
+    for (let j = bodyStart; j + mlen <= n; j++) {
+      if (s.indexOf(mark, j) !== j) continue;
+      if (/\s/.test(s[j - 1])) continue;
+      if (wordGuard && isWord(j + mlen < n ? s[j + mlen] : undefined)) continue;
+      end = j;
+      break;
+    }
+    if (end < 0) {
+      i = at + 1;
+      continue;
+    }
+    out += s.substring(last, at);
+    out += s.substring(bodyStart, end);
+    last = end + mlen;
+    i = last;
+  }
+  return out + s.substring(last);
+}
 
 /** 行内标记转纯文本：行内代码 → 内容；粗体 → 内容；删除线 → 内容；HTML 标签 → 无 */
 function plainInline(t: string): string {
   t = t.replace(/(`+)([^`]*?)\1/g, "$2");
-  t = t.replace(BOLD_RE, "$1");
-  t = t.replace(/~~(?=\S)([\s\S]*?)(?<=\S)~~/g, "$1");
+  t = stripPairs(t, "**", true);   // 粗体；`__` 不处理——`__init__` 这类标识符会被误伤
+  t = stripPairs(t, "~~", false);  // 删除线
   return pyStrip(t.replace(/<[^>]+>/g, ""));
 }
 

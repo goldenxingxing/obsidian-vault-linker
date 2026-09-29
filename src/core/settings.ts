@@ -41,7 +41,7 @@ export interface EntityRule {
   aliases: string[];
   /** 拉丁词默认大小写不敏感 */
   caseSensitive: boolean;
-  /** 拉丁词默认加词边界 (?<![A-Za-z0-9_])…(?![A-Za-z0-9_]) */
+  /** 拉丁词默认要求前后都不是 [A-Za-z0-9_]（整词匹配） */
   wordBoundary: boolean;
   /** 打分权重，默认 1 */
   weight: number;
