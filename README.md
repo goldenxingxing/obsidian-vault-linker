@@ -9,6 +9,8 @@ short "Related notes" list at the end of each note, ranked by the topics the not
 as your vault changes, and everything it writes lives in clearly marked blocks that it can update or remove
 at any time.
 
+![Related notes at the end of a note](./assets/screenshots/01-related-notes.png)
+
 ## Highlights
 
 - **Your text is never modified.** The plugin writes only inside its own managed blocks. After every write it
@@ -60,6 +62,12 @@ Notes in the vault root are listed on `Other notes`:
 - [[Projects/Search/v2|Search v2]] — Goals for the second version of search…
 ```
 
+![A generated index page](./assets/screenshots/02-index-page.png)
+
+The same note in Obsidian's local graph — with the plugin off, and after one run:
+
+![A note's local graph before and after](./assets/screenshots/03-graph.png)
+
 When a folder is renamed or deleted, its old index page is moved to the trash on the next run. Only pages the
 plugin generated are ever removed.
 
@@ -110,6 +118,8 @@ defaults and live in the settings JSON: **Export**, edit, **Import**.
 
 The report after each run lists what changed, what was skipped and why. Every run is also appended to
 `.obsidian/plugins/vault-linker-auto/vault-linker.log`.
+
+![The settings page](./assets/screenshots/04-settings.png)
 
 ## Safety
 

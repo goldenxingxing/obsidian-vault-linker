@@ -8,6 +8,8 @@ Vault Linker 在笔记之上维护一层「链接」：给 vault 的每个领域
 「相关文档」，按两篇笔记共享的主题排序。vault 有变化时它会自动更新；它写的所有内容都放在带标记的区块里，
 随时可以重写或删除。
 
+![笔记末尾的相关笔记区块](./assets/screenshots/zh/01-related-notes.png)
+
 ## 亮点
 
 - **不改你写的内容。**只在自己的区块里写。每次写完都逐字节核对：去掉区块后的笔记必须和原来一模一样，
@@ -53,6 +55,12 @@ Vault Linker 在笔记之上维护一层「链接」：给 vault 的每个领域
 
 - [[项目/搜索/二期|搜索二期]] — 搜索第二版的目标…
 ```
+
+![自动生成的索引页](./assets/screenshots/zh/02-index-page.png)
+
+同一篇笔记在 Obsidian 局部图谱里的样子——插件关闭时，和运行一次之后：
+
+![一篇笔记的局部图谱：前 vs 后](./assets/screenshots/zh/03-graph.png)
 
 文件夹改名或删掉后，下一次运行会把它的旧索引页移到回收站。只会删插件自己生成的页面。
 
@@ -100,6 +108,8 @@ Vault Linker 在笔记之上维护一层「链接」：给 vault 的每个领域
 
 每次运行后的报告会列出改了什么、跳过了什么、为什么跳过；每次运行也会追加到
 `.obsidian/plugins/vault-linker-auto/vault-linker.log`。
+
+![设置页](./assets/screenshots/zh/04-settings.png)
 
 ## 安全机制
 
