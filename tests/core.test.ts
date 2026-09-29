@@ -139,6 +139,34 @@ test("titleOf / summaryOf", () => {
   assert.equal(summaryOf("看 [[a/b|目标]] 和 [文字](http://x)\n", Q), "看 目标 和 文字");
 });
 
+test("summaryOf 跳过表格行 / 代码块 / 注释 / 分隔线，只留可读内容", () => {
+  // 表格行（含分隔行）不是摘要，继续往后找
+  assert.equal(summaryOf("# 标题\n\n| 时间 | 事项 |\n|---|---|\n| 9月 | 上线 |\n真正的内容。\n", Q), "真正的内容。");
+  // 代码块：定界符本身和块内内容都不取
+  assert.equal(summaryOf("# 标题\n\n```\ncode\n```\n正文。\n", Q), "正文。");
+  assert.equal(summaryOf("# 标题\n\n~~~\ncode\n~~~\n正文。\n", Q), "正文。");
+  // HTML 注释：单行与多行
+  assert.equal(summaryOf("# 标题\n\n<!-- 单行 -->\n正文。\n", Q), "正文。");
+  assert.equal(summaryOf("# 标题\n\n<!-- 多行\n注释 -->\n正文。\n", Q), "正文。");
+  // 整篇只有标题 + 表格 → 回落到无摘要
+  assert.equal(summaryOf("# 标题\n\n| a | b |\n", Q), Q.texts.noSummary);
+});
+
+test("summaryOf 列表项去标记、行内标记转纯文本", () => {
+  assert.equal(summaryOf("# 标题\n\n- 第一项要点\n正文。\n", Q), "第一项要点");
+  assert.equal(summaryOf("# 标题\n\n* 第一项要点\n正文。\n", Q), "第一项要点");
+  assert.equal(summaryOf("# 标题\n\n1. 第一项要点\n正文。\n", Q), "第一项要点");
+  assert.equal(summaryOf("结论：**TinyLFU 最好**\n", Q), "结论：TinyLFU 最好");
+  assert.equal(summaryOf("用 `MEMORY PURGE` 清理\n", Q), "用 MEMORY PURGE 清理");
+  assert.equal(summaryOf("删除 ~~旧值~~ 描述\n", Q), "删除 旧值 描述");
+  assert.equal(summaryOf("见 <strong>这里</strong>\n", Q), "见 这里");
+  // `-` 紧跟非空白不是列表标记
+  assert.equal(summaryOf("-5 度以下\n", Q), "-5 度以下");
+  assert.equal(summaryOf("1.5 倍\n", Q), "1.5 倍");
+  // 整行只有标记 → 继续往后找，别返回空摘要
+  assert.equal(summaryOf("# 标题\n\n*\n**\n正文。\n", Q), "正文。");
+});
+
 test("summaryOf 按 code point 截断（不是 UTF-16）", () => {
   const s = "😀".repeat(70); // 70 code points / 140 UTF-16 units
   const out = summaryOf(s + "\n", Q);

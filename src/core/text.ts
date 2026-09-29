@@ -22,16 +22,73 @@ export function titleOf(content: string, rel: string, s: Settings): string {
   return pyBasename(rel).slice(0, -3);
 }
 
-/** 摘要：正文第一个非空、非标题、非分隔线、非 HTML 注释行，截断到 summaryMaxChars */
+/** 分隔线：整行只有 `-` / `_` / `*`（CommonMark 要求 ≥3 个） */
+const HR_RE = /^(?:-{3,}|_{3,}|\*{3,})$/;
+
+/**
+ * 有序 / 无序列表标记；后面**必须**跟空白，避免误伤 `-5`、`1.5`。
+ * 注意分组写法：闭括号要收在 `[.)]` 之后、空白类之前。
+ * 若写成 `(?:[-*+]|(?:\d{1,9}[.)])[WS]+)`，闭括号落在空白类之后，
+ * `[WS]+` 就只约束第二个分支，`-` 会单独命中 `-5`。
+ */
+const LIST_MARKER_RE = new RegExp(`^(?:[-*+]|\\d{1,9}[.)])[${PY_WS_CLASS}]+`);
+
+/** 整行只有列表标记（`*`、`**` 这种没有内容的空要点）→ 不是摘要 */
+const MARKERS_ONLY_RE = /^[-*+]+$/;
+
+/** 粗体标记；`__` 不处理——`__init__` 这类标识符会被误伤 */
+const BOLD_RE = /(?<!\w)\*\*(?=\S)([\s\S]*?)(?<=\S)\*\*(?!\w)/g;
+
+/** 行内标记转纯文本：行内代码 → 内容；粗体 → 内容；删除线 → 内容；HTML 标签 → 无 */
+function plainInline(t: string): string {
+  t = t.replace(/(`+)([^`]*?)\1/g, "$2");
+  t = t.replace(BOLD_RE, "$1");
+  t = t.replace(/~~(?=\S)([\s\S]*?)(?<=\S)~~/g, "$1");
+  return pyStrip(t.replace(/<[^>]+>/g, ""));
+}
+
+/**
+ * 摘要：正文第一个可读的行，转成纯文本后截断到 summaryMaxChars。
+ * 跳过的是排版结构而不是内容：标题、表格行、代码块（含定界符）、分隔线、空要点、HTML 注释、空行。
+ * 列表项只去掉标记保留内容；行内代码 / 粗体 / 删除线 / 链接转纯文本，
+ * 否则索引页里会出现 `|---|`、`**` 这类排版残留。
+ */
 export function summaryOf(content: string, s: Settings): string {
   const body = bodyWithoutFm(stripAllBlocks(content, s), s);
+  let fence: { ch: string; len: number } | null = null;  // 当前代码块的定界符
+  let inComment = false;                                   // 多行 HTML 注释内
   for (const line of pySplitLines(body)) {
-    let t = pyStrip(line);
-    if (!t || t.startsWith("#") || t === "---" || t === "***" || t === "___" || t.startsWith("<!--")) continue;
-    t = pyStrip(pyLstripQuoteSpace(t));
+    const raw = pyStrip(line);
+
+    // 代码块：同字符且长度不小于定界符的那一行才闭合
+    const fm = raw.match(/^(`{3,}|~{3,})(.*)$/);
+    if (fm) {
+      const ch = fm[1].slice(0, 1);
+      const len = fm[1].length;
+      if (fence && ch === fence.ch && len >= fence.len) fence = null;
+      else if (!fence) fence = { ch, len };
+      continue;
+    }
+    if (fence) continue;
+
+    // HTML 注释可能跨行
+    if (inComment) {
+      if (raw.includes("-->")) inComment = false;
+      continue;
+    }
+    if (raw.includes("<!--")) {
+      if (!raw.includes("-->")) inComment = true;
+      continue;
+    }
+
+    if (!raw || raw.startsWith("#") || raw.startsWith("|") || HR_RE.test(raw) || MARKERS_ONLY_RE.test(raw)) continue;
+
+    let t = pyStrip(pyLstripQuoteSpace(raw));
+    t = t.replace(LIST_MARKER_RE, "");
     // 摘要内的 wikilink / markdown 链接转纯文本，避免 MOC 里带外链
     t = t.replace(/!?\[\[(?:[^\]|]*\|)?([^\]]*)\]\]/g, "$1");
     t = t.replace(/\[([^\]]*)\]\([^)]*\)/g, "$1");
+    t = plainInline(t);
     if (!t) continue;
     const n = pyLen(t);
     return pySlice(t, s.moc.summaryMaxChars) + (n > s.moc.summaryMaxChars ? "…" : "");
