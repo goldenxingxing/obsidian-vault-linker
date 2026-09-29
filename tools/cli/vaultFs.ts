@@ -59,7 +59,7 @@ export function readBytes(absPath: string): Buffer {
 
 export function writeTextAtomic(absPath: string, content: string): void {
   fs.mkdirSync(path.dirname(absPath), { recursive: true });
-  const base = absPath.split("/").pop() as string;
+  const base = path.basename(absPath);
   const tmp = path.join(path.dirname(absPath), `.${base}.vaultlinker-tmp-${process.pid}`);
   fs.writeFileSync(tmp, content, { encoding: "utf-8" });
   fs.renameSync(tmp, absPath);
