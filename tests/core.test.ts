@@ -14,7 +14,7 @@ import { appendEndBlock, stripEndBlock } from "../src/core/blocks.ts";
 import {
   hasFrontmatter, isOptedOut, parseFrontmatterTags,
 } from "../src/core/frontmatter.ts";
-import { cleanAlias, summaryOf, titleOf, wikilink } from "../src/core/text.ts";
+import { cleanAlias, summaryOf, titleOf, wikilink, dedupeDisplays } from "../src/core/text.ts";
 import { collectInScope, ensureDomains, globMatch, templatePaths, withRuntimeExcludes } from "../src/core/scope.ts";
 import { withOriginalEol } from "../src/core/text.ts";
 import { applyPlan } from "../tools/cli/apply.ts";
@@ -868,4 +868,85 @@ test("首次安装的中文用户：索引页文件名也是中文", () => {
   assert.equal(s.moc.homeFile, "主页");
   const r = runOnce({ "a.md": "# A\n" }, new Map(), s);
   assert.ok(r.moc.has("_moc/主页.md") && r.moc.has("_moc/其他笔记.md"));
+});
+
+test("dedupeDisplays：不撞车的条目原样返回", () => {
+  const out = dedupeDisplays(["a/苹果.md", "b/香蕉.md"], (r) => r.slice(r.lastIndexOf("/") + 1, -3));
+  assert.equal(out.get("a/苹果.md"), "苹果");
+  assert.equal(out.get("b/香蕉.md"), "香蕉");
+});
+
+test("dedupeDisplays：标题撞、文件名不同 → 加文件名后缀", () => {
+  const out = dedupeDisplays(
+    ["日报/D-2026-09-21.md", "日报/D-2026-09-23.md"],
+    () => "Kalinin",
+  );
+  assert.equal(out.get("日报/D-2026-09-21.md"), "Kalinin（D-2026-09-21）");
+  assert.equal(out.get("日报/D-2026-09-23.md"), "Kalinin（D-2026-09-23）");
+});
+
+test("dedupeDisplays：文件名也撞 → 往上补目录段直到唯一", () => {
+  const out = dedupeDisplays(
+    ["9月/D-2026-09-21.md", "8月/D-2026-09-21.md"],
+    () => "Kalinin",
+  );
+  assert.equal(out.get("9月/D-2026-09-21.md"), "Kalinin（9月/D-2026-09-21）");
+  assert.equal(out.get("8月/D-2026-09-21.md"), "Kalinin（8月/D-2026-09-21）");
+});
+
+test("dedupeDisplays：三条撞车也能各自区分", () => {
+  const out = dedupeDisplays(
+    ["a/X.md", "b/X.md", "c/Y.md"],
+    (r) => (r.endsWith("Y.md") ? "别的" : "同名"),
+  );
+  assert.equal(out.get("a/X.md"), "同名（a/X）");
+  assert.equal(out.get("b/X.md"), "同名（b/X）");
+  assert.equal(out.get("c/Y.md"), "别的");
+});
+
+test("相关笔记区块：两条同 H1 的笔记都入选时加文件名后缀消歧", () => {
+  const s = defaultSettings();
+  const r = runOnce(
+    {
+      "小淳/方案.md": "# 方案\n\nKalinin 项目推进与验证路径\n",
+      "日报/D-2026-09-21.md": "# Kalinin\n\n项目推进\n",
+      "日报/D-2026-09-23.md": "# Kalinin\n\n项目推进\n",
+    },
+    new Map(),
+    s,
+  );
+  const block = r.files["小淳/方案.md"];
+  assert.ok(block.includes("[[日报/D-2026-09-21|Kalinin（D-2026-09-21）]]"), block);
+  assert.ok(block.includes("[[日报/D-2026-09-23|Kalinin（D-2026-09-23）]]"), block);
+});
+
+test("相关笔记区块：没有同名条目时输出不带后缀（保持原样）", () => {
+  const s = defaultSettings();
+  const r = runOnce(
+    {
+      "a/x.md": "# 方案\n\n本体内容\n",
+      "a/y.md": "# 说明\n\n参见 方案\n",
+    },
+    new Map(),
+    s,
+  );
+  const block = r.files["a/x.md"];
+  assert.ok(block.includes("[[a/y|说明]]"), block);
+  assert.ok(!block.includes("（"), block);
+});
+
+test("索引页：同一小节里两条同 H1 的笔记加后缀消歧", () => {
+  const s = defaultSettings();
+  const r = autoRun(
+    {
+      "日报/D-2026-09-21.md": "# Kalinin\n\n苹果\n",
+      "日报/D-2026-09-23.md": "# Kalinin\n\n香蕉\n",
+      "其他/z.md": "# Z\n\n苹果 香蕉\n",
+    },
+    new Map(),
+    s,
+  );
+  const page = r.moc.get("_moc/日报.md") as string;
+  assert.ok(page.includes("[[日报/D-2026-09-21|Kalinin（D-2026-09-21）]]"), page);
+  assert.ok(page.includes("[[日报/D-2026-09-23|Kalinin（D-2026-09-23）]]"), page);
 });

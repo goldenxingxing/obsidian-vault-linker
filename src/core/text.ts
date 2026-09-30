@@ -152,6 +152,50 @@ export function wikilink(rel: string, display?: string): string {
   return `[[${target}]]`;
 }
 
+/**
+ * 同一列表里多条笔记的显示文本撞车时加最短可区分后缀：`标题（后缀）`。
+ * 第一级后缀是文件名（典型场景：两篇 H1 都叫「Kalinin」的日报，文件名带日期天然可读）；
+ * 文件名也撞时往上补目录段，直到组内唯一。不撞车的条目原样返回，输出一字不变。
+ * 列表按调用处的展示单位算（笔记的相关笔记区块 / 索引页的一个小节），纯函数。
+ */
+export function dedupeDisplays(rels: readonly string[], display: (rel: string) => string): Map<string, string> {
+  const groups = new Map<string, string[]>();
+  for (const rel of rels) {
+    const d = display(rel);
+    const list = groups.get(d);
+    if (list) list.push(rel);
+    else groups.set(d, [rel]);
+  }
+  const out = new Map<string, string>();
+  for (const [d, group] of groups) {
+    if (group.length === 1) {
+      out.set(group[0], d);
+      continue;
+    }
+    // 逐级加长后缀（文件名 → 上级目录/文件名 → …），直到组内每条的后缀都不同
+    const segsOf = (rel: string): string[] => rel.split("/");
+    const suffixFor = (rel: string, depth: number): string =>
+      segsOf(rel).slice(-depth).join("/").replace(/\.md$/, "");
+    const maxDepth = Math.max(...group.map((rel) => segsOf(rel).length));
+    let depth = 1;
+    for (; depth < maxDepth; depth++) {
+      const used = new Set<string>();
+      let clash = false;
+      for (const rel of group) {
+        const suf = suffixFor(rel, depth);
+        if (used.has(suf)) {
+          clash = true;
+          break;
+        }
+        used.add(suf);
+      }
+      if (!clash) break;
+    }
+    for (const rel of group) out.set(rel, `${d}（${suffixFor(rel, depth)}）`);
+  }
+  return out;
+}
+
 /** 简单模板替换：{name} → 值 */
 export function fillTemplate(tpl: string, vars: Record<string, string>): string {
   return tpl.replace(/\{(\w+)\}/g, (whole, key: string) =>

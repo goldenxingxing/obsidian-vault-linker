@@ -13,7 +13,7 @@ import type { DomainRule, Settings } from "./settings.ts";
 import { pySort } from "./pycompat.ts";
 import { classify } from "./classify.ts";
 import { collectInScope } from "./scope.ts";
-import { titleOf, summaryOf, wikilink, fillTemplate } from "./text.ts";
+import { titleOf, summaryOf, wikilink, fillTemplate, dedupeDisplays } from "./text.ts";
 import { appendEndBlock, blockSeparator, stripAllBlocks } from "./blocks.ts";
 import { isOptedOut, isPluginDataFile } from "./frontmatter.ts";
 import { buildEntityMatchers, entitiesOf, entitySourceDoc, entityText, pathSegmentsOf, type EntityMatcher } from "./entities.ts";
@@ -186,8 +186,10 @@ export function* planSteps(input: EngineInput): Generator<void, PlanOutput, void
     let body = s.texts.relatedHeading + "\n\n";
     // 关掉索引页时不链过去：那一页不会生成，链接会失效
     if (s.moc.enabled) body += fillTemplate(s.texts.relatedNavLine, { link: wikilink(mocPath(dom, s)) }) + "\n";
-    for (const t of autolinks.get(rel) as string[]) {
-      body += fillTemplate(s.texts.relatedEntryLine, { link: wikilink(t, titles.get(t)) }) + "\n";
+    const targets = autolinks.get(rel) as string[];
+    const displays = dedupeDisplays(targets, (t) => titles.get(t) ?? "");
+    for (const t of targets) {
+      body += fillTemplate(s.texts.relatedEntryLine, { link: wikilink(t, displays.get(t)) }) + "\n";
     }
     return appendEndBlock(out, s.related.blockTag, body, sep);
   };
