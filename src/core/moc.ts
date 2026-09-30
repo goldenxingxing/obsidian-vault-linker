@@ -3,7 +3,7 @@
  */
 
 import { DEFAULT_MOC_FOLDER, textsFor, type DomainRule, type Settings } from "./settings.ts";
-import { fillTemplate, wikilink, dedupeDisplays } from "./text.ts";
+import { fillTemplate, wikilink, wikilinkT, dedupeDisplays } from "./text.ts";
 import { pySort } from "./pycompat.ts";
 
 /**
@@ -73,6 +73,8 @@ export interface MocInputs {
   titles: ReadonlyMap<string, string>;
   summaries: ReadonlyMap<string, string>;
   today: string;
+  /** 链接目标缩短表（text.ts shortestTargets）：条目链接写最短唯一目标 */
+  targets?: ReadonlyMap<string, string>;
 }
 
 /** 索引页的一条：带摘要用 mocEntryLine，关掉摘要时只列链接 */
@@ -112,7 +114,7 @@ export function buildMoc(
   }
   // 小节内部撞显示名的（比如两篇 H1 相同的日报）加最短可区分后缀
   const line = (rel: string, displays: ReadonlyMap<string, string>): string =>
-    entryLine(wikilink(rel, displays.get(rel)), rel, summaries, s);
+    entryLine(wikilinkT(input.targets?.get(rel) ?? rel.replace(/\.md$/, ""), displays.get(rel)), rel, summaries, s);
   const rootList = groups.get("") ?? [];
   const rootDisplays = dedupeDisplays(rootList, (r) => titles.get(r) ?? "");
   for (const rel of rootList) lines.push(line(rel, rootDisplays));

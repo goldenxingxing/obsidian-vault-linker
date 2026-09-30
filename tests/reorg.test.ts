@@ -188,7 +188,7 @@ test("E5a 结构性：同文件夹的笔记互为相关（正文毫无交集也�
     },
   );
   const jia = out.get("分组/甲.md") as string;
-  assert.ok(jia.includes("[[分组/乙.md") || jia.includes("[[分组/乙|"), "同文件夹应互链");
+  assert.ok(jia.includes("[[乙|"), "同文件夹应互链");
   const root = out.get("根.md") as string;
   assert.ok(!root.includes("[[分组/"), "根目录文件不共享文件夹实体");
 });
@@ -204,7 +204,7 @@ test("E5a 默认关：同文件夹、正文无交集则不互链", () => {
       s.entities.fromTags = false;
     },
   );
-  assert.ok(!(out.get("分组/甲.md") as string).includes("[[分组/乙"));
+  assert.ok(!(out.get("分组/甲.md") as string).includes("[[乙|"));
 });
 
 test("E5a + E5b 组合：正文提到文件夹名 ↔ 归档在该文件夹的笔记相连", () => {
@@ -221,5 +221,5 @@ test("E5a + E5b 组合：正文提到文件夹名 ↔ 归档在该文件夹的�
     },
   );
   const bing = out.get("丙.md") as string;
-  assert.ok(bing.includes("[[缓存改造/丁.md") || bing.includes("[[缓存改造/丁|"), "提到文件夹名的笔记应与文件夹内的笔记相连");
+  assert.ok(bing.includes("[[丁|"), "提到文件夹名的笔记应与文件夹内的笔记相连");
 });

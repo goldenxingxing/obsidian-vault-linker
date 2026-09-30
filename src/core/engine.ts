@@ -13,7 +13,7 @@ import type { DomainRule, Settings } from "./settings.ts";
 import { pySort } from "./pycompat.ts";
 import { classify } from "./classify.ts";
 import { collectInScope } from "./scope.ts";
-import { titleOf, summaryOf, wikilink, fillTemplate, dedupeDisplays } from "./text.ts";
+import { titleOf, summaryOf, wikilink, wikilinkT, fillTemplate, dedupeDisplays, shortestTargets } from "./text.ts";
 import { appendEndBlock, blockSeparator, stripAllBlocks } from "./blocks.ts";
 import { isOptedOut, isPluginDataFile } from "./frontmatter.ts";
 import { buildEntityMatchers, entitiesOf, entitySourceDoc, entityText, pathSegmentsOf, type EntityMatcher } from "./entities.ts";
@@ -166,6 +166,11 @@ export function* planSteps(input: EngineInput): Generator<void, PlanOutput, void
   }
   const df = computeDf(docEntities);
   const postings = buildPostings(docEntities);
+  // 链接目标缩短：文件名全 vault 唯一就只写文件名，撞了往上补目录段（universe 含排除目录，防抢占）
+  const linkShort = shortestTargets(
+    rels,
+    input.allFiles.filter((f) => f.toLowerCase().endsWith(".md")),
+  );
   const autolinks = new Map<string, string[]>();
   for (let i = 0; i < rels.length; i++) {
     const rel = rels[i];
@@ -189,7 +194,7 @@ export function* planSteps(input: EngineInput): Generator<void, PlanOutput, void
     const targets = autolinks.get(rel) as string[];
     const displays = dedupeDisplays(targets, (t) => titles.get(t) ?? "");
     for (const t of targets) {
-      body += fillTemplate(s.texts.relatedEntryLine, { link: wikilink(t, displays.get(t)) }) + "\n";
+      body += fillTemplate(s.texts.relatedEntryLine, { link: wikilinkT(linkShort.get(t) ?? t.replace(/\.md$/, ""), displays.get(t)) }) + "\n";
     }
     return appendEndBlock(out, s.related.blockTag, body, sep);
   };
@@ -236,7 +241,7 @@ export function* planSteps(input: EngineInput): Generator<void, PlanOutput, void
     domainCounts.set(d.id, list.length);
     mocReport.push({ id: d.id, name: d.name, count: list.length });
     if (s.moc.enabled) {
-      putMoc(mocPath(d, s), buildMoc(d, list, { titles, summaries, today: input.today }, s));
+      putMoc(mocPath(d, s), buildMoc(d, list, { titles, summaries, today: input.today, targets: linkShort }, s));
     }
   }
   if (s.moc.enabled) putMoc(homePath(s), buildHome(domainCounts, input.today, s));

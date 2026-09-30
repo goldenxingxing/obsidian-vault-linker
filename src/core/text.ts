@@ -147,7 +147,11 @@ export function summaryOf(content: string, s: Settings): string {
 
 /** `[[target]]` 或 `[[target|display]]`（rel 是 .md 路径，链接里去掉扩展名） */
 export function wikilink(rel: string, display?: string): string {
-  const target = rel.slice(0, -3);
+  return wikilinkT(rel.slice(0, -3), display);
+}
+
+/** 同上，但 target 已去扩展名（shortestTargets 的产物用它，避免二次截断） */
+export function wikilinkT(target: string, display?: string): string {
   if (display) return `[[${target}|${cleanAlias(display)}]]`;
   return `[[${target}]]`;
 }
@@ -192,6 +196,51 @@ export function dedupeDisplays(rels: readonly string[], display: (rel: string) =
       if (!clash) break;
     }
     for (const rel of group) out.set(rel, `${d}（${suffixFor(rel, depth)}）`);
+  }
+  return out;
+}
+
+/**
+ * 计算每条 rel 的「最短唯一链接目标」：文件名（去扩展名）在 vault 里唯一就只写文件名，
+ * 撞车了往上补目录段，直到在所有 md 里唯一（大小写不敏感，对齐 Obsidian 的解析）。
+ * universe 是 vault 全量 md（含排除目录），防止被范围外的同名文件抢占解析。
+ * 与 dedupeDisplays 是两套独立逻辑：那个管竖线后的显示文本，这个管竖线前的链接目标。
+ */
+export function shortestTargets(rels: readonly string[], universe: readonly string[]): Map<string, string> {
+  const all = universe.length > 0 ? universe : rels;
+  // 每个候选长度下的后缀计数（小写键）
+  const countAt = (depth: number): Map<string, number> => {
+    const m = new Map<string, number>();
+    for (const r of all) {
+      const segs = r.split("/");
+      if (segs.length < depth) continue;
+      const key = segs.slice(-depth).join("/").replace(/\.md$/i, "").toLowerCase();
+      m.set(key, (m.get(key) ?? 0) + 1);
+    }
+    return m;
+  };
+  const depthCache = new Map<number, Map<string, number>>();
+  const counts = (depth: number): Map<string, number> => {
+    let c = depthCache.get(depth);
+    if (!c) {
+      c = countAt(depth);
+      depthCache.set(depth, c);
+    }
+    return c;
+  };
+  const out = new Map<string, string>();
+  for (const rel of rels) {
+    const segs = rel.split("/");
+    const maxDepth = segs.length; // 最深就是全路径（不含扩展名）
+    let target = segs.join("/").replace(/\.md$/i, "");
+    for (let depth = 1; depth <= maxDepth; depth++) {
+      const cand = segs.slice(-depth).join("/").replace(/\.md$/i, "");
+      if ((counts(depth).get(cand.toLowerCase()) ?? 0) === 1) {
+        target = cand;
+        break;
+      }
+    }
+    out.set(rel, target);
   }
   return out;
 }

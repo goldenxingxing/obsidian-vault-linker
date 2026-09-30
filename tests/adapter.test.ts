@@ -122,7 +122,7 @@ test("适配层端到端：plan → apply → 写入正文与 MOC，保护校验
   const a = vault.files.get("eng/a.md") as string;
   assert.ok(a.startsWith("# A 文档\n\n关于 API 与缓存的说明。\n"));
   assert.match(a, /<!-- AUTO-LINKS:START -->/);
-  assert.match(a, /\[\[eng\/b\|B 文档\]\]/);
+  assert.match(a, /\[\[b\|B 文档\]\]/);
   // MOC 新建（目录不存在时应自动 createFolder + create）
   assert.ok(vault.files.has("_moc/工程.md"));
   assert.ok(vault.files.has("_moc/00-主页.md"));

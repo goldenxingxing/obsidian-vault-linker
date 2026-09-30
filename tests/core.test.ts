@@ -14,7 +14,7 @@ import { appendEndBlock, stripEndBlock } from "../src/core/blocks.ts";
 import {
   hasFrontmatter, isOptedOut, parseFrontmatterTags,
 } from "../src/core/frontmatter.ts";
-import { cleanAlias, summaryOf, titleOf, wikilink, dedupeDisplays } from "../src/core/text.ts";
+import { cleanAlias, summaryOf, titleOf, wikilink, dedupeDisplays, shortestTargets } from "../src/core/text.ts";
 import { collectInScope, ensureDomains, globMatch, templatePaths, withRuntimeExcludes } from "../src/core/scope.ts";
 import { withOriginalEol } from "../src/core/text.ts";
 import { applyPlan } from "../tools/cli/apply.ts";
@@ -257,7 +257,7 @@ test("引擎端到端：生成 MOC + 互链，且二次运行 0 修改（幂等�
   assert.equal(first.out.report.mocPlanned, 8); // 6 个领域 + 兜底 + 主页
   assert.ok(first.out.report.autoLinkTotal > 0);
   // A 与 B 共享 API+缓存，应互链
-  assert.match(first.files["eng/a.md"], /\[\[eng\/b\|B 文档\]\]/);
+  assert.match(first.files["eng/a.md"], /\[\[b\|B 文档\]\]/);
   // 正文原样保留在开头，不补 frontmatter
   assert.ok(first.files["eng/a.md"].startsWith(files["eng/a.md"]));
   // MOC 里按领域分组
@@ -643,7 +643,7 @@ test("关掉自动互链就不写区块；关掉摘要则索引页只列链接",
   const p = genericRun(files, s);
   assert.equal(p.changedDocs.length, 0);
   const moc = [...p.mocChanges.values()].map((c) => c.new).join("\n");
-  assert.ok(moc.includes("[[Notes/a|A]]"));
+  assert.ok(moc.includes("[[a|A]]"));
   assert.ok(!moc.includes("第一段摘要"));
 });
 
@@ -916,8 +916,8 @@ test("相关笔记区块：两条同 H1 的笔记都入选时加文件名后缀�
     s,
   );
   const block = r.files["小淳/方案.md"];
-  assert.ok(block.includes("[[日报/D-2026-09-21|Kalinin（D-2026-09-21）]]"), block);
-  assert.ok(block.includes("[[日报/D-2026-09-23|Kalinin（D-2026-09-23）]]"), block);
+  assert.ok(block.includes("[[D-2026-09-21|Kalinin（D-2026-09-21）]]"), block);
+  assert.ok(block.includes("[[D-2026-09-23|Kalinin（D-2026-09-23）]]"), block);
 });
 
 test("相关笔记区块：没有同名条目时输出不带后缀（保持原样）", () => {
@@ -931,7 +931,7 @@ test("相关笔记区块：没有同名条目时输出不带后缀（保持原�
     s,
   );
   const block = r.files["a/x.md"];
-  assert.ok(block.includes("[[a/y|说明]]"), block);
+  assert.ok(block.includes("[[y|说明]]"), block);
   assert.ok(!block.includes("（"), block);
 });
 
@@ -947,6 +947,62 @@ test("索引页：同一小节里两条同 H1 的笔记加后缀消歧", () => {
     s,
   );
   const page = r.moc.get("_moc/日报.md") as string;
-  assert.ok(page.includes("[[日报/D-2026-09-21|Kalinin（D-2026-09-21）]]"), page);
-  assert.ok(page.includes("[[日报/D-2026-09-23|Kalinin（D-2026-09-23）]]"), page);
+  assert.ok(page.includes("[[D-2026-09-21|Kalinin（D-2026-09-21）]]"), page);
+  assert.ok(page.includes("[[D-2026-09-23|Kalinin（D-2026-09-23）]]"), page);
+});
+
+test("shortestTargets：文件名唯一就只写文件名", () => {
+  const out = shortestTargets(["a/苹果.md", "b/香蕉.md"], ["a/苹果.md", "b/香蕉.md", "c/影子.md"]);
+  assert.equal(out.get("a/苹果.md"), "苹果");
+  assert.equal(out.get("b/香蕉.md"), "香蕉");
+});
+
+test("shortestTargets：文件名撞了往上补目录段", () => {
+  const out = shortestTargets(
+    ["9月/D-2026-09-21.md", "8月/D-2026-09-21.md"],
+    ["9月/D-2026-09-21.md", "8月/D-2026-09-21.md"],
+  );
+  assert.equal(out.get("9月/D-2026-09-21.md"), "9月/D-2026-09-21");
+  assert.equal(out.get("8月/D-2026-09-21.md"), "8月/D-2026-09-21");
+});
+
+test("shortestTargets：universe 里范围外的同名文件也参与唯一性（防抢占）", () => {
+  const out = shortestTargets(["a/苹果.md"], ["a/苹果.md", "_archive/苹果.md"]);
+  assert.equal(out.get("a/苹果.md"), "a/苹果");
+});
+
+test("shortestTargets：大小写不敏感", () => {
+  const out = shortestTargets(["a/Note.md"], ["a/Note.md", "b/note.md"]);
+  assert.equal(out.get("a/Note.md"), "a/Note");
+});
+
+test("端到端：相关区块里的链接目标缩短为文件名", () => {
+  const s = defaultSettings();
+  const r = runOnce(
+    {
+      "a/x.md": "# X\n\n参见 香蕉 的说明。\n",
+      "b/y.md": "# 香蕉\n\n内容。\n",
+    },
+    new Map(),
+    s,
+  );
+  const block = r.files["a/x.md"];
+  assert.ok(block.includes("[[y|香蕉]]"), block);
+  assert.ok(!block.includes("[[b/y|"), block);
+});
+
+test("端到端：同名文件跨目录时目标补目录段", () => {
+  const r = autoRun(
+    {
+      "组/甲.md": "# 甲\n\n苹果\n",
+      "9月/same.md": "# S1\n\n苹果\n",
+      "8月/same.md": "# S2\n\n苹果\n",
+    },
+    new Map(),
+    defaultSettings(),
+  );
+  const p9 = r.moc.get("_moc/9月.md") as string;
+  assert.ok(p9.includes("[[9月/same|S1]]"), p9);
+  const p8 = r.moc.get("_moc/8月.md") as string;
+  assert.ok(p8.includes("[[8月/same|S2]]"), p8);
 });
