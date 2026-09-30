@@ -245,6 +245,27 @@ export function shortestTargets(rels: readonly string[], universe: readonly stri
   return out;
 }
 
+/**
+ * 渲染前最后一道：显示文本带的后缀若与缩短后的链接目标完全重复
+ * （`Kalinin（D-2026-09-23）` + 目标 `D-2026-09-23`），去掉后缀——日期在目标里已经自带，
+ * 不必显示两遍；标题（Kalinin）是主要语义，原样保留。
+ * 撞名是靠别的后缀区分的（目标与后缀不同，如 `Kalinin（9月/D-2026-09-21）`）则原样保留。
+ */
+export function collapseDisplays(
+  rels: readonly string[],
+  displays: ReadonlyMap<string, string>,
+  targets: ReadonlyMap<string, string>,
+): Map<string, string> {
+  const out = new Map<string, string>();
+  for (const rel of rels) {
+    const d = displays.get(rel) ?? "";
+    const t = targets.get(rel);
+    const suffix = t ? `（${t}）` : "";
+    out.set(rel, suffix !== "" && d.endsWith(suffix) ? d.slice(0, d.length - suffix.length) : d);
+  }
+  return out;
+}
+
 /** 简单模板替换：{name} → 值 */
 export function fillTemplate(tpl: string, vars: Record<string, string>): string {
   return tpl.replace(/\{(\w+)\}/g, (whole, key: string) =>

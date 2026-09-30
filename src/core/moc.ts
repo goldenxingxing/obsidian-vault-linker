@@ -3,7 +3,7 @@
  */
 
 import { DEFAULT_MOC_FOLDER, textsFor, type DomainRule, type Settings } from "./settings.ts";
-import { fillTemplate, wikilink, wikilinkT, dedupeDisplays } from "./text.ts";
+import { fillTemplate, wikilink, wikilinkT, dedupeDisplays, collapseDisplays } from "./text.ts";
 import { pySort } from "./pycompat.ts";
 
 /**
@@ -112,16 +112,19 @@ export function buildMoc(
     if (list) list.push(rel);
     else groups.set(g, [rel]);
   }
-  // 小节内部撞显示名的（比如两篇 H1 相同的日报）加最短可区分后缀
+  // 小节内部撞显示名的（比如两篇 H1 相同的日报）加最短可区分后缀；
+  // 后缀与缩短后的链接目标重复时再去掉（日期/路径在目标里已自带）
   const line = (rel: string, displays: ReadonlyMap<string, string>): string =>
     entryLine(wikilinkT(input.targets?.get(rel) ?? rel.replace(/\.md$/, ""), displays.get(rel)), rel, summaries, s);
+  const collapse = (list: readonly string[], displays: Map<string, string>): Map<string, string> =>
+    collapseDisplays(list, displays, input.targets ?? new Map());
   const rootList = groups.get("") ?? [];
-  const rootDisplays = dedupeDisplays(rootList, (r) => titles.get(r) ?? "");
+  const rootDisplays = collapse(rootList, dedupeDisplays(rootList, (r) => titles.get(r) ?? ""));
   for (const rel of rootList) lines.push(line(rel, rootDisplays));
   if (groups.has("")) lines.push("");
   for (const g of pySort([...groups.keys()].filter((k) => k !== ""))) {
     const list = groups.get(g) as string[];
-    const displays = dedupeDisplays(list, (r) => titles.get(r) ?? "");
+    const displays = collapse(list, dedupeDisplays(list, (r) => titles.get(r) ?? ""));
     lines.push("## " + g, "");
     for (const rel of list) lines.push(line(rel, displays));
     lines.push("");
