@@ -20,11 +20,14 @@ jobs:
         with:
           node-version: 24
 
-      - name: Install, test and build
+      - name: Install and check
         run: |
           npm ci
+          npm run typecheck
+          npm run lint
           npm test
           npm run build
+          npm run check:release
 
       - name: Attest release assets
         uses: actions/attest-build-provenance@v2

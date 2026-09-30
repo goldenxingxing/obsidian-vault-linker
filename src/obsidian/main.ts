@@ -9,12 +9,16 @@ import {
   applyAutoTexts, defaultSettings, mergeSettings, todayIso, upgradeBuiltins, type Settings,
 } from "../core/settings.ts";
 import { migrateAutoAccepted } from "../core/config-text.ts";
+import { applySuggestions, detectPathDrift, type PathDrift, type RenameEvidence } from "../core/reorg.ts";
 import type { PlanOutput } from "../core/engine.ts";
 import { applyPlanObsidian, effectiveSettings, formatReport, planVault, type ApplyOutcome } from "./runner.ts";
 import { ChangeWatcher } from "./watch.ts";
 import { LinkerSettingTab } from "./settings-tab.ts";
 import { ReportModal } from "./report-modal.ts";
 import { EntityWizardModal } from "./wizard-modal.ts";
+
+/** rename 证据上限：够覆盖一次数千文件的大整理，又不至于无界增长 */
+const MAX_RENAME_EVIDENCE = 5000;
 
 /** 影响 ChangeWatcher 行为的配置指纹：只有它变了才需要重启监听 */
 function watcherKey(s: Settings): string {
@@ -36,6 +40,12 @@ export default class VaultLinkerPlugin extends Plugin {
   private statusEl: HTMLElement | null = null;
   private lastPlan: PlanOutput | null = null;
   private lastOutcome: ApplyOutcome | undefined;
+  private lastDrift: PathDrift | null = null;
+  /**
+   * rename 事件攒下的 old→new 路径对（仅文件名变化不影响映射，聚合时会过滤）。
+   * 只做整理建议的「配对证据」，不做决定——外部整理没有事件，漂移检测必须独立成立。
+   */
+  private renameEvidence: RenameEvidence[] = [];
   private lastRunAt: string | null = null;
   private pendingCount = 0;
   private busy = false;
@@ -92,7 +102,14 @@ export default class VaultLinkerPlugin extends Plugin {
       this.registerEvent(this.app.vault.on("modify", onChange));
       this.registerEvent(this.app.vault.on("create", onChange));
       this.registerEvent(this.app.vault.on("delete", onChange));
-      this.registerEvent(this.app.vault.on("rename", onChange));
+      // rename 额外攒下 old→new 证据，供整理检测把死路径和孤儿目录配成对
+      this.registerEvent(this.app.vault.on("rename", (file: TAbstractFile, oldPath: string) => {
+        this.renameEvidence.push({ old: oldPath, new: file.path });
+        if (this.renameEvidence.length > MAX_RENAME_EVIDENCE) {
+          this.renameEvidence.splice(0, this.renameEvidence.length - MAX_RENAME_EVIDENCE);
+        }
+        onChange(file);
+      }));
 
       this.startWatcher();
       if (this.settings.trigger.runOnStartup) {
@@ -197,13 +214,19 @@ export default class VaultLinkerPlugin extends Plugin {
       const s = await effectiveSettings(this.app, this.settings);
       const plan = await planVault(this.app, s, todayIso());
       this.lastPlan = plan;
+      // 整理检测：自定义过分组的用户改了文件夹后，映射与现实脱节 → 报告里给确认后可应用的更新
+      this.lastDrift = detectPathDrift(
+        this.app.vault.getFiles().map((f) => f.path),
+        s,
+        this.renameEvidence,
+      );
       let outcome: ApplyOutcome | undefined;
       if (mode === "apply") {
         outcome = await applyPlanObsidian(this.app, plan, s, { skipOpen: auto ? this.openFiles() : undefined });
       }
       this.lastOutcome = outcome;
       this.lastRunAt = new Date().toLocaleTimeString();
-      const text = formatReport(plan, this.settings, mode, outcome);
+      const text = formatReport(plan, this.settings, mode, outcome, this.lastDrift);
       await this.appendLog(`\n===== ${new Date().toISOString()} ${mode} =====\n${text}\n`);
       if (notify) {
         new Notice(
@@ -220,7 +243,15 @@ export default class VaultLinkerPlugin extends Plugin {
         new Notice(
           t(`Vault Linker：${conflicts.length} 个索引页的位置已有同名文件（或只差大小写），未覆盖：${conflicts.slice(0, 3).join("、")}`,
             `Vault Linker: ${conflicts.length} index pages were not written because a file with the same name ` +
-            `(or differing only in case) already exists: ${conflicts.slice(0, 3).join(", ")}`),
+              `(or differing only in case) already exists: ${conflicts.slice(0, 3).join(", ")}`),
+          10000,
+        );
+      }
+      const driftCount = this.lastDrift.suggestions.length;
+      if (driftCount > 0 && notify) {
+        new Notice(
+          t(`Vault Linker：检测到 ${driftCount} 条文件夹整理带来的分组映射变化，打开运行报告可确认更新`,
+            `Vault Linker: ${driftCount} folder mappings no longer match after you reorganized folders. Open the run report to update them`),
           10000,
         );
       }
@@ -247,7 +278,20 @@ export default class VaultLinkerPlugin extends Plugin {
       this.settings,
       this.lastOutcome ? "apply" : "dry-run",
       this.lastOutcome,
+      // 与 run() 的报告保持一致：命令里复制走的文本也该带上整理检测那一段
+      this.lastDrift ?? undefined,
     );
-    new ReportModal(this.app, t("Vault Linker 运行报告", "Vault Linker report"), text).open();
+    new ReportModal(this.app, t("Vault Linker 运行报告", "Vault Linker report"), text, {
+      suggestions: this.lastDrift?.suggestions ?? [],
+      onApply: async (picks) => {
+        const n = applySuggestions(this.settings, picks);
+        if (n === 0) return;
+        // 用过的证据清掉：映射已更新，避免旧证据在下一轮重复配对
+        this.renameEvidence = [];
+        await this.saveSettings();
+        new Notice(t(`已更新 ${n} 条分组映射，正在重新生成链接…`, `Updated ${n} mappings; regenerating links…`));
+        void this.run("apply", true);
+      },
+    }).open();
   }
 }

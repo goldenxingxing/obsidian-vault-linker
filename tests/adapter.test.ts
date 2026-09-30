@@ -39,7 +39,7 @@ class FakeVault {
     const c = this.files.get(path);
     if (c === undefined) throw new Error("ENOENT " + path);
     const enc = new TextEncoder().encode(c);
-    return enc.buffer.slice(enc.byteOffset, enc.byteOffset + enc.byteLength) as ArrayBuffer;
+    return enc.buffer.slice(enc.byteOffset, enc.byteOffset + enc.byteLength);
   }
 
   getFiles(): Array<{ path: string; stat: { mtime: number; size: number } }> {
@@ -198,7 +198,7 @@ test("非 UTF-8 文件被跳过", async () => {
   const bad = new Uint8Array([0xff, 0xfe, 0x41]);
   (vault as unknown as { readBinary: (f: { path: string }) => Promise<ArrayBuffer> }).readBinary = async (f) => {
     if (f.path === "eng/bad.md") return bad.buffer;
-    const enc = new TextEncoder().encode(vault.files.get(f.path) as string);
+    const enc = new TextEncoder().encode(vault.files.get(f.path));
     return enc.buffer;
   };
   vault.files.set("eng/bad.md", "placeholder");

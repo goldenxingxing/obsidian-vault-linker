@@ -24,7 +24,7 @@ export interface EntityMatcher {
   wordBoundary: boolean;
   weight: number;
   /** 来源标记，仅用于 UI 展示 */
-  source: "manual" | "auto" | "tag" | "title";
+  source: "manual" | "auto" | "tag" | "title" | "path";
   /** 命中示例文档（向导展示用，运行时可选填充） */
   sample?: string;
 }
@@ -74,6 +74,41 @@ function entityKey(term: string): string {
 /** 只由数字、空白和日期分隔符组成（2026-09-20、20260920、2026年9月20日、12:30） */
 function isDateLike(term: string): boolean {
   return /^[\d\s\-_./:年月日号]+$/.test(term.trim());
+}
+
+/**
+ * 内置的「结构词」文件夹名：这类名字说明的是组织方式，不是笔记讲什么，
+ * 当主题词只会是噪音。比较用小写（对 CJK 无影响）。
+ * 用户自己的词表/停用词照常叠加生效。
+ */
+const GENERIC_DIR_STOPWORDS: ReadonlySet<string> = new Set([
+  "notes", "note", "docs", "doc", "files", "attachments", "assets", "images", "imgs",
+  "photos", "archive", "archives", "backup", "backups", "drafts", "draft", "inbox",
+  "outbox", "templates", "template", "journal", "diary", "daily", "weekly", "misc",
+  "unsorted", "private", "new folder", "untitled",
+  "新建文件夹", "未命名", "附件", "笔记", "文档", "草稿", "归档", "模板", "日记",
+  "图片", "照片", "素材", "待整理", "未分类", "其他", "临时", "杂项",
+]);
+
+/**
+ * E5 的原料：一篇笔记路径里的**文件夹段**（不含文件名——文件名已经作为标题走 E1）。
+ * 过滤：过短（minLength）、纯日期（2026、09、2026-09…）、内置结构词、用户停用词。
+ * 深层路径会贡献多段：score 的 1/df 天然把「人人都有的顶层目录」稀释掉、
+ * 把「只有几篇笔记的深层子文件夹」顶上来，不需要按层级手工调权。
+ */
+export function pathSegmentsOf(rel: string, s: Settings): string[] {
+  const parts = rel.split("/");
+  const out: string[] = [];
+  for (const seg of parts.slice(0, -1)) {
+    const t = seg.trim();
+    if (!t) continue;
+    if (pyLen(t) < s.entities.minLength) continue;
+    if (isDateLike(t)) continue;
+    if (GENERIC_DIR_STOPWORDS.has(t.toLowerCase())) continue;
+    if (s.entities.stopwords.includes(t)) continue;
+    out.push(t);
+  }
+  return [...new Set(out)];
 }
 
 /**
@@ -141,6 +176,15 @@ export function buildEntityMatchers(s: Settings, docs: readonly EntitySourceDoc[
     for (const doc of docs) {
       if (!generic(doc.title)) add(doc.title, 1, "title");
       for (const alias of doc.aliases) if (!isDateLike(alias)) add(alias, 1, "title");
+    }
+  }
+
+  // E5 文件夹名（词义性）：用户给文件夹起的名字是整个 vault 里质量最高的「人工策展词表」。
+  // 正文**提到**某文件夹名 → 与归档在该文件夹下的笔记相关（哪怕那些笔记从没写过这四个字）。
+  // 与 E1 的关系：文件夹名恰好等于某篇笔记标题时由去重合并（title 先到、path 让位）。
+  if (s.entities.fromPathNames) {
+    for (const doc of docs) {
+      for (const seg of pathSegmentsOf(doc.rel, s)) add(seg, 1, "path");
     }
   }
 

@@ -16,7 +16,7 @@ import { collectInScope } from "./scope.ts";
 import { titleOf, summaryOf, wikilink, fillTemplate } from "./text.ts";
 import { appendEndBlock, blockSeparator, stripAllBlocks } from "./blocks.ts";
 import { isOptedOut, isPluginDataFile } from "./frontmatter.ts";
-import { buildEntityMatchers, entitiesOf, entitySourceDoc, entityText, type EntityMatcher } from "./entities.ts";
+import { buildEntityMatchers, entitiesOf, entitySourceDoc, entityText, pathSegmentsOf, type EntityMatcher } from "./entities.ts";
 import { EntityIndex } from "./multimatch.ts";
 import { buildPostings, computeDf, linkTargets, weightMap } from "./score.ts";
 import { allDomains, buildHome, buildMoc, homePath, isForeignMoc, mocPath } from "./moc.ts";
@@ -153,6 +153,16 @@ export function* planSteps(input: EngineInput): Generator<void, PlanOutput, void
     const c = input.contents.get(rel) as string;
     docEntities.set(rel, index ? index.hits(entityText(c, s)) : entitiesOf(c, matchers, s));
     if (i % YIELD_EVERY === YIELD_EVERY - 1) yield;
+  }
+  // E5（结构性）：同一文件夹下的笔记共享该文件夹名实体——不经过文本匹配，直接并入
+  // 笔记自己的实体集。下游 df / postings / rankRelated 一行不用改：顶层目录段人人都有，
+  // 被 1/df 稀释到接近零；只有几篇笔记的深层子文件夹段权重自动升高。
+  // 注意这些实体不在 matchers 里（除非 E5 词义性也开着），因此 entityUsage 报告不含它们。
+  if (s.entities.fromPaths) {
+    for (const rel of rels) {
+      const set = docEntities.get(rel) as Set<string>;
+      for (const seg of pathSegmentsOf(rel, s)) set.add(seg);
+    }
   }
   const df = computeDf(docEntities);
   const postings = buildPostings(docEntities);

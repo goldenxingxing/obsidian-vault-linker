@@ -39,3 +39,16 @@
   color: var(--text-muted);
   font-size: var(--font-ui-smaller);
 }
+
+.vault-linker-suggestion {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  justify-content: space-between;
+  padding: 4px 0;
+  border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.vault-linker-suggestion:last-of-type {
+  border-bottom: none;
+}

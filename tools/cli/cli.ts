@@ -21,6 +21,7 @@ const out = (line: string): void => {
 import { planFromFiles, type PlanOutput } from "../../src/core/engine.ts";
 import { PRESETS, applyAutoTexts, defaultSettings, mergeSettings, todayIso, type Settings } from "../../src/core/settings.ts";
 import { ensureDomains, templatePaths, withRuntimeExcludes } from "../../src/core/scope.ts";
+import { detectPathDrift } from "../../src/core/reorg.ts";
 import { safeDirPath } from "../../src/core/moc.ts";
 import { listAllFiles, readTextOrNull } from "./vaultFs.ts";
 import { applyPlan } from "./apply.ts";
@@ -97,6 +98,8 @@ export function runCli(args: Args): { plan: PlanOutput; applied: ReturnType<type
   );
   // `language: auto` → 按环境语言选内置文案（插件端传 Obsidian 的语言）
   applyAutoTexts(s, process.env.LC_ALL ?? process.env.LC_MESSAGES ?? process.env.LANG);
+  // 整理检测要在 ensureDomains 之前：检测的是**用户保存的**分组（为空 = 自动模式，无漂移）
+  const drift = detectPathDrift(allFiles, s);
   // domains 为空 → 按顶层目录自动探测（设置页上承诺的“首次运行自动探测”）
   const domainsDetected = ensureDomains(s, allFiles);
   const mocPrefix = safeDirPath(s.moc.folder) + "/";
@@ -116,6 +119,18 @@ export function runCli(args: Args): { plan: PlanOutput; applied: ReturnType<type
   );
 
   if (!args.quiet) printReport(plan, s, args.apply);
+  if (drift.suggestions.length > 0 && !args.quiet) {
+    out(`检测到文件夹整理（分组映射与现实脱节，CLI 只报告；插件报告弹窗里可一键更新，或手工改配置）:`);
+    for (const sug of drift.suggestions) {
+      if (sug.kind === "rename") {
+        out(`  [reorg] 分组「${sug.domainName}」: 路径 ${sug.oldPath}/ 现为 ${sug.newPath}/（${sug.count} 篇）`);
+      } else if (sug.kind === "dead") {
+        out(`  [reorg] 分组「${sug.domainName}」: 路径 ${sug.oldPath}/ 下已无文件`);
+      } else {
+        out(`  [reorg] 目录 ${sug.dir}/ 有 ${sug.count} 篇笔记未映射到任何分组`);
+      }
+    }
+  }
   if (domainsDetected && !args.quiet) {
     out(`（domains 为空，已按顶层目录自动探测出 ${s.domains.length} 个领域）`);
   }

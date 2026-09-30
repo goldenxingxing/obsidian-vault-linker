@@ -45,7 +45,7 @@ function pollFor(quietSec: number): number {
 }
 
 /** control 定义的扁平键（多数字段在 settings 里是嵌套的，读写都经手这两个重写） */
-type ControlKey = "autoUpdate" | "quietPeriodSec" | "relatedTopN" | "mocEnabled";
+type ControlKey = "autoUpdate" | "quietPeriodSec" | "relatedTopN" | "mocEnabled" | "fromPaths" | "fromPathNames";
 
 export class LinkerSettingTab extends PluginSettingTab {
   private plugin: VaultLinkerPlugin;
@@ -95,6 +95,10 @@ export class LinkerSettingTab extends PluginSettingTab {
         return this.s.related.enabled ? this.s.related.topN : 0;
       case "mocEnabled":
         return this.s.moc.enabled;
+      case "fromPaths":
+        return this.s.entities.fromPaths;
+      case "fromPathNames":
+        return this.s.entities.fromPathNames;
     }
     return undefined;
   }
@@ -121,6 +125,12 @@ export class LinkerSettingTab extends PluginSettingTab {
       }
       case "mocEnabled":
         this.s.moc.enabled = Boolean(value);
+        break;
+      case "fromPaths":
+        this.s.entities.fromPaths = Boolean(value);
+        break;
+      case "fromPathNames":
+        this.s.entities.fromPathNames = Boolean(value);
         break;
     }
     this.save();
@@ -238,6 +248,18 @@ export class LinkerSettingTab extends PluginSettingTab {
               }),
             );
         },
+      },
+      {
+        name: t("文件夹结构参与相关度", "Use folder structure for relatedness"),
+        desc: t("同一个文件夹里的笔记互为相关，和标题、标签一起参与打分。给文件夹分层就是在告诉插件谁和谁相关。",
+          "Notes in the same folder are related, on equal footing with titles and tags. Organizing your folders tells the plugin what belongs together."),
+        control: { type: "toggle", key: "fromPaths" },
+      },
+      {
+        name: t("文件夹名作为主题词", "Folder names as topic terms"),
+        desc: t("笔记正文提到某文件夹的名字时，与归档在那个文件夹里的笔记相关——哪怕那些笔记从没写过这个词。",
+          "When a note mentions the name of a folder, it relates to the notes filed in that folder, even if they never spell it out."),
+        control: { type: "toggle", key: "fromPathNames" },
       },
       {
         name: t("导入 / 导出设置", "Import / export settings"),

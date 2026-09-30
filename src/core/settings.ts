@@ -107,6 +107,10 @@ export interface Settings {
     manual: EntityRule[];
     /** E4：向导里勾选采纳的自动候选 */
     autoAccepted: string[];
+    /** E5a（结构性）：同一文件夹下的笔记共享文件夹名实体，不经过文本匹配 */
+    fromPaths: boolean;
+    /** E5b（词义性）：文件夹名作为词表条目，正文提到即命中 */
+    fromPathNames: boolean;
     stopwords: string[];
     /** 词长下限（code point 计） */
     minLength: number;
@@ -340,6 +344,9 @@ export function defaultSettings(): Settings {
       tagMode: "top",
       manual: [],
       autoAccepted: [],
+      // E5 默认关：升级用户打开会改变全部区块里的链接，必须是一个显式的用户决定
+      fromPaths: false,
+      fromPathNames: false,
       stopwords: [],
       minLength: 2,
       ignoreInCode: false,
@@ -434,9 +441,15 @@ function mergeOneLevel(base: Record<string, unknown>, saved: Record<string, unkn
   return out;
 }
 
-/** 供首次运行向导使用：按顶层目录自动生成领域规则。 */
+/**
+ * 供首次运行向导使用：按顶层目录自动生成领域规则。
+ *
+ * 只跳过"机器目录"（插件自己的产物、依赖、约定的下划线临时目录），不跳任何具体主题的目录：
+ * 这里每多一个名字，就有一个用户自己的文件夹被静默排除（没有索引页、没有链接，也没有提示）。
+ * 只放图片/附件的目录不需要在这里排除——调用方只传"含在范围 .md 的目录"（见 scope.ensureDomains）。
+ */
 export function detectDomainsFromDirs(topDirs: readonly string[]): DomainRule[] {
-  const skip = new Set(["_moc", "_tmp", "_archive", "node_modules", "videos"]);
+  const skip = new Set(["_moc", "_tmp", "_archive", "node_modules"]);
   const out: DomainRule[] = [];
   for (const d of topDirs) {
     if (d.startsWith(".") || skip.has(d)) continue;

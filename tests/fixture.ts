@@ -43,6 +43,8 @@ export function samplePreset(): Settings {
       ...["缓存", "分布式", "延迟"].map((term) => ({ term, aliases: [], caseSensitive: true, wordBoundary: false, weight: 1 })),
     ],
     autoAccepted: [],
+    fromPaths: false,
+    fromPathNames: false,
     stopwords: [],
     minLength: 2,
     ignoreInCode: false,

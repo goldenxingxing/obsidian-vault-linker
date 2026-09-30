@@ -296,7 +296,13 @@ export async function applyPlanObsidian(
 }
 
 /** 把运行报告渲染成便于人读 + agent 事后核查的文本 */
-export function formatReport(plan: PlanOutput, s: Settings, mode: "dry-run" | "apply", outcome?: ApplyOutcome): string {
+export function formatReport(
+  plan: PlanOutput,
+  s: Settings,
+  mode: "dry-run" | "apply",
+  outcome?: ApplyOutcome,
+  drift?: { suggestions: ReadonlyArray<{ kind: string; domainName: string | null; oldPath: string | null; newPath: string | null; dir: string | null; count: number }> },
+): string {
   const r = plan.report;
   const lines: string[] = [];
   lines.push(t("模式: ", "Mode: ") + (mode === "apply" ? "APPLY" : "DRY-RUN"));
@@ -322,6 +328,21 @@ export function formatReport(plan: PlanOutput, s: Settings, mode: "dry-run" | "a
   if (r.unmappedFiles.length > 0) {
     lines.push(t(`未映射目录文件: ${r.unmappedFiles.length}（已归入「${s.fallbackDomain.name}」，可在设置里补目录映射）`,
       `Notes in no area: ${r.unmappedFiles.length} (listed under "${s.fallbackDomain.name}"; add their folders to an area in settings)`));
+  }
+  if (drift && drift.suggestions.length > 0) {
+    lines.push(t(`检测到文件夹整理: ${drift.suggestions.length} 条分组映射与现实脱节（报告弹窗里可确认更新）:`,
+      `Folder reorganization detected: ${drift.suggestions.length} mappings no longer match (apply them from the report):`));
+    for (const sug of drift.suggestions.slice(0, 10)) {
+      const what =
+        sug.kind === "rename"
+          ? t(`「${sug.domainName}」${sug.oldPath}/ → ${sug.newPath}/（${sug.count} 篇）`,
+            `"${sug.domainName}": ${sug.oldPath}/ -> ${sug.newPath}/ (${sug.count} notes)`)
+          : sug.kind === "dead"
+            ? t(`「${sug.domainName}」${sug.oldPath}/ 下已无文件`,
+              `"${sug.domainName}": no files left under ${sug.oldPath}/`)
+            : t(`${sug.dir}/（${sug.count} 篇未映射）`, `${sug.dir}/ (${sug.count} unmapped notes)`);
+      lines.push(`  - ${what}`);
+    }
   }
   if (outcome) {
     lines.push(t(`写入正文 ${outcome.written} 篇（跳过 ${outcome.skipped.length} 篇：写前内容已变）`,

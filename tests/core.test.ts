@@ -288,11 +288,11 @@ test("边界：无尾换行 / 空文件 / 正文含 --- / BOM", () => {
   const second = runOnce(first.files, first.moc, Q);
   assert.equal(second.out.report.plannedChanges, 0);
   // 空文件：区块从第一行开始（glue 为空串分支），分隔线用 ***，不留一个没闭合的 ---
-  const empty = first.files["eng/empty.md"] as string;
+  const empty = first.files["eng/empty.md"];
   assert.ok(empty.startsWith("***\n<!-- AUTO-LINKS:START -->\n"));
   assert.ok(empty.endsWith("<!-- AUTO-LINKS:END -->\n"));
   // BOM 保留在正文开头之后（不剥 BOM）
-  assert.ok((first.files["eng/bom.md"] as string).includes("\uFEFF"));
+  assert.ok(first.files["eng/bom.md"].includes("\uFEFF"));
 });
 
 test("整词匹配（不用 lookbehind）与 lookbehind 正则语义一致", () => {

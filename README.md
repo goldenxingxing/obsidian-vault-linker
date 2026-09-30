@@ -31,6 +31,13 @@ at any time.
   templates, Excalidraw drawings, Kanban boards and the note you're editing, and keeps Windows line endings.
 - **Private and portable.** No network access, no telemetry, no runtime dependencies. Works on mobile.
   The interface follows Obsidian's language (English or Chinese).
+- **Reorganize folders freely.** Links are recomputed from current paths on every run, so moves and
+  renames heal themselves. If you customized area mappings, the run report detects mappings that no
+  longer match your folders and offers confirmed updates; renames done inside Obsidian make those
+  suggestions exact, while changes made outside (scripts, AI agents) are still caught by the full scan.
+- **Folder structure as a topic source (optional).** Notes in the same folder become related, and a
+  note that mentions a folder's name relates to the notes filed in it — how you organize your folders
+  itself tells the plugin what belongs together.
 
 ## What it writes
 
@@ -121,6 +128,17 @@ The report after each run lists what changed, what was skipped and why. Every ru
 
 ![The settings page](./assets/screenshots/04-settings.png)
 
+## After you reorganize folders
+
+- **Links take care of themselves.** Every run recomputes links from current paths, so moved, renamed
+  and deleted notes heal on the next run.
+- **If you never customized areas** (the default): areas are re-derived from top-level folders on every
+  run, so renamed, new and deleted folders are followed automatically.
+- **If you did customize area mappings**: the run report lists mappings that no longer match (e.g.
+  "Area X: path A/ no longer exists; it is now B/") and you can apply the update right from the report.
+  Renames done inside Obsidian make the suggestion exact; changes made outside (scripts, AI agents)
+  are still detected by the full scan, they just need your eyes on the new path.
+
 ## Safety
 
 Every write goes through these checks:
@@ -134,9 +152,25 @@ Every write goes through these checks:
 - **Leave special files alone.** Templates (the folders set in Templates and Templater, and the daily note
   template), Excalidraw drawings, Kanban boards and the index folder itself are never written to. The note open
   in the editor is skipped during automatic runs and updated later.
+- **Skips machine folders.** Anything inside a dot-folder or `node_modules/` is ignored, along with the
+  top-level folders `_moc/`, `_tmp/` and `_archive/`. If your notes live in one of those, change or clear the
+  list under `scan.excludeTopDirs` / `scan.excludeAnyDirs` in the settings JSON (Export, edit, Import).
 - **Opt out per note.** Add `vault-linker: ignore` to a note's frontmatter.
 - **Keep formatting.** Windows (CRLF) line endings are kept. A note that begins with a `---` rule gets a `***`
   separator instead, so the plugin never turns your text into frontmatter by accident.
+
+## Privacy and file access
+
+No network access, no telemetry, no accounts, no runtime dependencies, nothing to sign up for. Everything the
+plugin touches lives inside your vault folder:
+
+- **Your notes** — read and written, but only inside its own managed blocks.
+- **Its own folder** — each run appends a report to `<configDir>/plugins/vault-linker-auto/vault-linker.log`,
+  so you can check afterwards what a run did. Nothing else is written there, and deleting the file is harmless.
+- **Your Obsidian settings, read-only** — to learn which folders hold your templates (so it can leave them
+  alone), it reads `templates.json`, `plugins/templater-obsidian/data.json` and `daily-notes.json` from your
+  Obsidian config folder. These are never modified. If you'd rather it didn't read them at all, turn off
+  `scan.excludeTemplates` in the settings JSON.
 
 ## Topics
 
@@ -148,6 +182,8 @@ Topics are what the plugin uses to find related notes. No vocabulary is built in
 | Tags | Tags you already use | Always |
 | Topic terms | Your own list, one per line, with optional aliases | Empty |
 | Find in my notes | Terms mined from your vault; the ones you tick are added to your topic terms | On demand |
+| Folder structure | Notes in the same folder share the folder name as a topic | Off |
+| Folder names | Folder names become topic terms; a note that mentions one relates to the notes filed there | Off |
 
 **Find in my notes** splits long identifiers into words and, for Chinese text, scores 2–4 character sequences by how
 tightly they stick together and how varied their neighbors are, so it finds real terms without a dictionary.
