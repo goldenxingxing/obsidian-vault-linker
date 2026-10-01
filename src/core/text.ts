@@ -250,18 +250,30 @@ export function shortestTargets(rels: readonly string[], universe: readonly stri
  * （`Kalinin（D-2026-09-23）` + 目标 `D-2026-09-23`），去掉后缀——日期在目标里已经自带，
  * 不必显示两遍；标题（Kalinin）是主要语义，原样保留。
  * 撞名是靠别的后缀区分的（目标与后缀不同，如 `Kalinin（9月/D-2026-09-21）`）则原样保留。
+ *
+ * 去后缀是**列表级**决策：两条都收成裸标题就分不清谁是谁了（0.3.4 的回归——
+ * 同一区块里两篇 Kalinin 都被收成 `[[D-…|Kalinin]]`，0.3.2 的消歧被撤掉了）。
+ * 所以先模拟去后缀再数一遍最终显示文本，撞车的条目全部保留原样（dedupeDisplays
+ * 保证原始显示文本在列表内唯一，回退后不会互相撞）。
  */
 export function collapseDisplays(
   rels: readonly string[],
   displays: ReadonlyMap<string, string>,
   targets: ReadonlyMap<string, string>,
 ): Map<string, string> {
-  const out = new Map<string, string>();
+  const finals: string[] = [];
   for (const rel of rels) {
     const d = displays.get(rel) ?? "";
     const t = targets.get(rel);
     const suffix = t ? `（${t}）` : "";
-    out.set(rel, suffix !== "" && d.endsWith(suffix) ? d.slice(0, d.length - suffix.length) : d);
+    finals.push(suffix !== "" && d.endsWith(suffix) ? d.slice(0, d.length - suffix.length) : d);
+  }
+  const counts = new Map<string, number>();
+  for (const f of finals) counts.set(f, (counts.get(f) ?? 0) + 1);
+  const out = new Map<string, string>();
+  for (let i = 0; i < rels.length; i++) {
+    const original = displays.get(rels[i]) ?? "";
+    out.set(rels[i], (counts.get(finals[i]) ?? 0) > 1 ? original : finals[i]);
   }
   return out;
 }

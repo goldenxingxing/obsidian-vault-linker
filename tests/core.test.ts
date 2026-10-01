@@ -916,8 +916,23 @@ test("相关笔记区块：两条同 H1 的笔记都入选时加文件名后缀�
     s,
   );
   const block = r.files["小淳/方案.md"];
+  assert.ok(block.includes("[[D-2026-09-21|Kalinin（D-2026-09-21）]]"), block);
+  assert.ok(block.includes("[[D-2026-09-23|Kalinin（D-2026-09-23）]]"), block);
+});
+
+test("相关笔记区块：只有一条 Kalinin 时去掉与目标重复的后缀", () => {
+  const s = defaultSettings();
+  const r = runOnce(
+    {
+      "小淳/方案.md": "# 方案\n\nKalinin 项目推进与验证路径\n",
+      "日报/D-2026-09-21.md": "# Kalinin\n\n项目推进\n",
+    },
+    new Map(),
+    s,
+  );
+  const block = r.files["小淳/方案.md"];
   assert.ok(block.includes("[[D-2026-09-21|Kalinin]]"), block);
-  assert.ok(block.includes("[[D-2026-09-23|Kalinin]]"), block);
+  assert.ok(!block.includes("Kalinin（"), block);
 });
 
 test("相关笔记区块：没有同名条目时输出不带后缀（保持原样）", () => {
@@ -947,8 +962,8 @@ test("索引页：同一小节里两条同 H1 的笔记加后缀消歧", () => {
     s,
   );
   const page = r.moc.get("_moc/日报.md") as string;
-  assert.ok(page.includes("[[D-2026-09-21|Kalinin]]"), page);
-  assert.ok(page.includes("[[D-2026-09-23|Kalinin]]"), page);
+  assert.ok(page.includes("[[D-2026-09-21|Kalinin（D-2026-09-21）]]"), page);
+  assert.ok(page.includes("[[D-2026-09-23|Kalinin（D-2026-09-23）]]"), page);
 });
 
 test("shortestTargets：文件名唯一就只写文件名", () => {
@@ -1007,7 +1022,15 @@ test("端到端：同名文件跨目录时目标补目录段", () => {
   assert.ok(p8.includes("[[8月/same|S2]]"), p8);
 });
 
-test("collapseDisplays：后缀与缩短目标重复时去掉后缀，标题保留", () => {
+test("collapseDisplays：只有一条时后缀与缩短目标重复就去掉，标题保留", () => {
+  const rels = ["日报/D-2026-09-21.md"];
+  const displays = new Map([["日报/D-2026-09-21.md", "Kalinin（D-2026-09-21）"]]);
+  const targets = new Map([["日报/D-2026-09-21.md", "D-2026-09-21"]]);
+  const out = collapseDisplays(rels, displays, targets);
+  assert.equal(out.get("日报/D-2026-09-21.md"), "Kalinin");
+});
+
+test("collapseDisplays：多条撞名时不能都去成裸标题（0.3.4 回归），保留原消歧后缀", () => {
   const rels = ["日报/D-2026-09-21.md", "日报/D-2026-09-23.md"];
   const displays = new Map([
     ["日报/D-2026-09-21.md", "Kalinin（D-2026-09-21）"],
@@ -1018,23 +1041,31 @@ test("collapseDisplays：后缀与缩短目标重复时去掉后缀，标题保�
     ["日报/D-2026-09-23.md", "D-2026-09-23"],
   ]);
   const out = collapseDisplays(rels, displays, targets);
-  assert.equal(out.get("日报/D-2026-09-21.md"), "Kalinin");
-  assert.equal(out.get("日报/D-2026-09-23.md"), "Kalinin");
+  assert.equal(out.get("日报/D-2026-09-21.md"), "Kalinin（D-2026-09-21）");
+  assert.equal(out.get("日报/D-2026-09-23.md"), "Kalinin（D-2026-09-23）");
 });
 
-test("collapseDisplays：后缀与目标重复就去掉（哪怕后缀带目录段），标题保留", () => {
-  const rels = ["9月/D-2026-09-21.md", "8月/D-2026-09-21.md"];
+test("collapseDisplays：与未撞名的裸标题撞车时，带后缀的回退、裸的保留", () => {
+  const rels = ["日报/D-2026-09-21.md", "人物/Kalinin.md"];
   const displays = new Map([
-    ["9月/D-2026-09-21.md", "Kalinin（9月/D-2026-09-21）"],
-    ["8月/D-2026-09-21.md", "Kalinin（8月/D-2026-09-21）"],
+    ["日报/D-2026-09-21.md", "Kalinin（D-2026-09-21）"],
+    ["人物/Kalinin.md", "Kalinin"],
   ]);
   const targets = new Map([
-    ["9月/D-2026-09-21.md", "9月/D-2026-09-21"],
-    ["8月/D-2026-09-21.md", "8月/D-2026-09-21"],
+    ["日报/D-2026-09-21.md", "D-2026-09-21"],
+    ["人物/Kalinin.md", "Kalinin"],
   ]);
   const out = collapseDisplays(rels, displays, targets);
+  assert.equal(out.get("日报/D-2026-09-21.md"), "Kalinin（D-2026-09-21）");
+  assert.equal(out.get("人物/Kalinin.md"), "Kalinin");
+});
+
+test("collapseDisplays：后缀与目标重复就去掉（只有一条，哪怕后缀带目录段），标题保留", () => {
+  const rels = ["9月/D-2026-09-21.md"];
+  const displays = new Map([["9月/D-2026-09-21.md", "Kalinin（9月/D-2026-09-21）"]]);
+  const targets = new Map([["9月/D-2026-09-21.md", "9月/D-2026-09-21"]]);
+  const out = collapseDisplays(rels, displays, targets);
   assert.equal(out.get("9月/D-2026-09-21.md"), "Kalinin");
-  assert.equal(out.get("8月/D-2026-09-21.md"), "Kalinin");
 });
 
 test("collapseDisplays：无后缀的普通条目原样返回", () => {
