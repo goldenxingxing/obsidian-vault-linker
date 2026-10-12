@@ -220,7 +220,6 @@ test("ChangeWatcher：变更 → 静默期 → 触发一次；触发后基线重
   s.scan.excludeTopDirs = ["_moc"];
   s.trigger.pollIntervalSec = 2; // 下限 2s
   s.trigger.quietPeriodSec = 1;
-  s.trigger.stableScans = 1;
 
   let fired = 0;
   const watcher = new ChangeWatcher(app, s, {
@@ -259,7 +258,6 @@ test("ChangeWatcher：运行期出现的外部改动会立即重跑", async () =
   const s = defaultSettings();
   s.trigger.pollIntervalSec = 2;
   s.trigger.quietPeriodSec = 1;
-  s.trigger.stableScans = 1;
 
   let fired = 0;
   const watcher = new ChangeWatcher(app, s, {
@@ -284,7 +282,6 @@ test("ChangeWatcher：引擎自己写过的路径不算外部改动（不白跑�
   const s = defaultSettings();
   s.trigger.pollIntervalSec = 2;
   s.trigger.quietPeriodSec = 1;
-  s.trigger.stableScans = 1;
 
   let fired = 0;
   const watcher = new ChangeWatcher(app, s, {
@@ -301,6 +298,72 @@ test("ChangeWatcher：引擎自己写过的路径不算外部改动（不白跑�
   watcher.stop();
 
   assert.equal(fired, 1, "自己的写入必须被排除，否则每次有产出都会白跑一轮");
+});
+
+// ---------------------------------------------------------------- 逐文件静置
+
+test("ChangeWatcher：启动对账把没更新的笔记按各自 mtime 投进待处理，旧文件立刻到点", async () => {
+  const { app } = makeApp({ "eng/a.md": "# A\n" });
+  const s = defaultSettings();
+  s.trigger.pollIntervalSec = 2;
+  s.trigger.quietPeriodSec = 1;
+
+  let fired = 0;
+  // 脏集由调用方持有：重启监听（改设置、开关插件）不该把待更新丢掉
+  const dirty = new Map<string, number>();
+  const watcher = new ChangeWatcher(
+    app,
+    s,
+    {
+      onPendingChange: () => {},
+      onQuietReached: async () => {
+        fired++;
+      },
+    },
+    dirty,
+  );
+  watcher.start();
+
+  watcher.reconcile(["eng/a.md"]);
+  assert.equal(watcher.pendingCount(), 1, "对账结果应进待处理");
+  assert.equal(dirty.size, 1, "用的就是外面传进来那个脏集");
+
+  await new Promise((r) => setTimeout(r, 3000));
+  watcher.stop();
+
+  assert.equal(fired, 1, "文件早就不动了 → 立刻到点，重启后立马补上（不用再等一个静置期）");
+  assert.equal(watcher.pendingCount(), 0, "跑完清空待处理");
+});
+
+test("ChangeWatcher：别的笔记一直在写，不会推迟已静置笔记的到点", async () => {
+  const { app, vault } = makeApp({ "eng/a.md": "# A\n" });
+  const s = defaultSettings();
+  s.trigger.pollIntervalSec = 2;
+  s.trigger.quietPeriodSec = 1;
+
+  let fired = 0;
+  const watcher = new ChangeWatcher(app, s, {
+    onPendingChange: () => {},
+    onQuietReached: async () => {
+      fired++;
+    },
+  });
+  watcher.start();
+  vault.files.set("eng/a.md", "# A 改过\n"); // a 动一下
+  watcher.notifyChange();
+
+  // 另一个文件被不停改动（模拟"你一直在写别的笔记"）：
+  // 旧的"全库安静 N 分钟"实现会被它无限推迟——每次轮询都看到差异，倒计时永远清零
+  const storm = setInterval(() => {
+    vault.files.set("eng/noisy.md", "# 在写\n\n" + "x".repeat(1 + (Date.now() % 5)));
+    watcher.notifyChange();
+  }, 300);
+
+  await new Promise((r) => setTimeout(r, 4000));
+  clearInterval(storm);
+  watcher.stop();
+
+  assert.ok(fired >= 1, `a 已经静置满配置时长，不该被无关文件的改动推掉（fired=${fired}）`);
 });
 
 test("一个 MOC 写不进去：记为失败，其余 MOC 照常写入，不中断整轮", async () => {
@@ -352,20 +415,35 @@ test("界面语言跟随 Obsidian：非中文界面的运行报告是英文", as
   }
 });
 
-test("ChangeWatcher：轮询定时器交给宿主登记（插件卸载时由 Obsidian 清理）", () => {
+test("ChangeWatcher：stop() 清掉还没触发的检查（自续期的 setTimeout 只能靠 stop 收拾）", () => {
   const { app } = makeApp({ "eng/a.md": "# A\n" });
-  const registered: number[] = [];
-  const watcher = new ChangeWatcher(app, defaultSettings(), {
-    onPendingChange: () => {},
-    onQuietReached: async () => {},
-    registerInterval: (id) => {
-      registered.push(id);
-      return id;
-    },
-  });
-  watcher.start();
-  watcher.stop();
-  assert.equal(registered.length, 1);
+  const host = (globalThis as unknown as { window: Record<string, unknown> }).window;
+  const realSet = host.setTimeout as (fn: () => void, ms: number) => number;
+  const realClear = host.clearTimeout as (h: number) => void;
+  const handles: number[] = [];
+  const cleared: number[] = [];
+  host.setTimeout = (fn: () => void, ms: number): number => {
+    const h = realSet(fn, ms);
+    handles.push(h);
+    return h;
+  };
+  host.clearTimeout = (h: number): void => {
+    cleared.push(h);
+    realClear(h);
+  };
+  try {
+    const watcher = new ChangeWatcher(app, defaultSettings(), {
+      onPendingChange: () => {},
+      onQuietReached: async () => {},
+    });
+    watcher.start();
+    assert.equal(handles.length, 1, "start() 应排上一次检查");
+    watcher.stop();
+    assert.deepEqual(cleared, handles, "stop() 必须把没触发的检查清掉（插件卸载不留定时器）");
+  } finally {
+    host.setTimeout = realSet;
+    host.clearTimeout = realClear;
+  }
 });
 
 test("ChangeWatcher：「跳过的文件夹」里的改动不进快照", () => {

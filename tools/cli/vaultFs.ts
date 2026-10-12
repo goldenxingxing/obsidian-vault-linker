@@ -15,7 +15,12 @@ const path = process.getBuiltinModule("node:path");
 type Dirent = import("node:fs").Dirent;
 import { pyUniversalNewlines } from "../../src/core/pycompat.ts";
 
-/** 递归列出 vault 内全部文件（相对路径，POSIX 分隔符），跳过 .git */
+/**
+ * 递归列出 vault 内全部文件（相对路径，POSIX 分隔符）。
+ * 跳过**所有点目录**：Obsidian 不索引它们，`.git`/`.obsidian` 之外还有各种工具自己的
+ * 快照目录（例如 `.tools/.snapshot` 可能是整库副本）。把它们算进来会让同名文件凭空变多，
+ * 链接目标从 `[[D-2026-09-21]]` 退化成全路径——而 Obsidian 里那个短链接本来是能解析的。
+ */
 export function listAllFiles(vaultRoot: string): string[] {
   const out: string[] = [];
   const walk = (dir: string): void => {
@@ -26,7 +31,7 @@ export function listAllFiles(vaultRoot: string): string[] {
       return;
     }
     for (const e of entries) {
-      if (e.name === ".git") continue;
+      if (e.name.startsWith(".")) continue;
       const full = path.join(dir, e.name);
       if (e.isDirectory()) walk(full);
       else if (e.isFile()) out.push(path.relative(vaultRoot, full).split(path.sep).join("/"));

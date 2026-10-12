@@ -57,14 +57,18 @@ function parseArgs(argv: readonly string[]): Args {
   };
 }
 
-function loadSettings(preset: string, config: string | null): Settings {
-  if (config) return mergeSettings(defaultSettings(), JSON.parse(fs.readFileSync(config, "utf8")));
+/** 载入配置。`textsMissing` = 这份配置里还没有文案（首次运行或旧版配置） */
+function loadSettings(preset: string, config: string | null): { s: Settings; textsMissing: boolean } {
+  if (config) {
+    const saved = JSON.parse(fs.readFileSync(config, "utf8")) as Record<string, unknown>;
+    return { s: mergeSettings(defaultSettings(), saved), textsMissing: saved.texts === undefined };
+  }
   const p = PRESETS[preset];
   if (!p) {
     console.error(`未知预设: ${preset}（可选: ${Object.keys(PRESETS).join(", ")}）`);
     process.exit(2);
   }
-  return p.build();
+  return { s: p.build(), textsMissing: true };
 }
 
 /**
@@ -92,12 +96,18 @@ export function runCli(args: Args): { plan: PlanOutput; applied: ReturnType<type
   const allFiles = listAllFiles(args.vault);
   // 本次运行实际生效的配置：排除 Obsidian 配置里的模板目录（不改预设本身）
   const configDir = findConfigDir(args.vault);
+  const loaded = loadSettings(args.preset, args.config);
   const s = withRuntimeExcludes(
-    loadSettings(args.preset, args.config),
+    loaded.s,
     configDir === null ? [] : templatePaths((rel) => readTextOrNull(path.join(args.vault, rel)), configDir),
   );
-  // `language: auto` → 按环境语言选内置文案（插件端传 Obsidian 的语言）
-  applyAutoTexts(s, process.env.LC_ALL ?? process.env.LC_MESSAGES ?? process.env.LANG);
+  // `language: auto` 只在"还没有文案"（首次运行 / 旧版配置）时按环境语言定内置文案，
+  // 和插件端一致（插件也只在首次安装时定）。已有文案的配置不能重新定：否则同一个 vault
+  // 会因为这次跑 CLI 的 shell 语言不同而整体翻成另一种语言——中文 vault 在 LANG=en_US
+  // 的 shell 里跑，几百篇笔记的区块会全部变成英文。
+  if (loaded.textsMissing) {
+    applyAutoTexts(s, process.env.LC_ALL ?? process.env.LC_MESSAGES ?? process.env.LANG);
+  }
   // 整理检测要在 ensureDomains 之前：检测的是**用户保存的**分组（为空 = 自动模式，无漂移）
   const drift = detectPathDrift(allFiles, s);
   // domains 为空 → 按顶层目录自动探测（设置页上承诺的“首次运行自动探测”）

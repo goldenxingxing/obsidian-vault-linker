@@ -115,11 +115,14 @@ After you enable it, the plugin **changes nothing on its own**.
 1. Open **Settings → Vault Linker Auto**.
 2. Click **Preview** to see what it would change; nothing is written.
 3. If you like the result, click **Update links**.
-4. To keep links up to date as you write, turn on **Update automatically**, and choose how long to wait after
-   your last change (30 seconds to 1 hour).
+4. To keep links up to date as you write, turn on **Update automatically**, and choose how long a note
+   should sit unchanged before it is refreshed (30 seconds to 1 hour). Each note is timed on its own, so
+   writing in one note never pushes another one's refresh back.
+5. Notes changed while Obsidian was closed (by scripts, sync tools or AI agents) are picked up and queued at
+   the next launch.
 
-That is all the setup there is. The settings page has seven items: run now, update automatically, how long to wait, related
-links per note, index pages, folders to skip, and optional topic terms. Each top-level folder gets its own index page,
+That is all the setup there is. The settings page has seven items: run now, update automatically, how long a
+note must sit unchanged, related links per note, index pages, folders to skip, and optional topic terms. Each top-level folder gets its own index page,
 including folders you create later. Finer options (scoring, generated text, timing) have sensible
 defaults and live in the settings JSON: **Export**, edit, **Import**.
 

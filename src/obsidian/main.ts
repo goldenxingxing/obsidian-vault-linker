@@ -20,13 +20,14 @@ import { EntityWizardModal } from "./wizard-modal.ts";
 /** rename 证据上限：够覆盖一次数千文件的大整理，又不至于无界增长 */
 const MAX_RENAME_EVIDENCE = 5000;
 
-/** 影响 ChangeWatcher 行为的配置指纹：只有它变了才需要重启监听 */
+/**
+ * 影响 ChangeWatcher 行为的配置指纹：只有它变了才需要重启监听。
+ * 时机相关的那几项（轮询间隔、静置时长、是否自动写入）不在这里：监听器每次排下一次
+ * 检查时都现读设置，改它们立刻生效，也不该为此重启（重启会重拍基线）。
+ */
 function watcherKey(s: Settings): string {
   return JSON.stringify([
     s.trigger.onFileChange,
-    s.trigger.pollIntervalSec,
-    s.trigger.quietPeriodSec,
-    s.trigger.stableScans,
     s.scan.excludeTopDirs,
     s.scan.excludeAnyDirs,
     s.scan.excludeHidden,
@@ -47,6 +48,11 @@ export default class VaultLinkerPlugin extends Plugin {
    */
   private renameEvidence: RenameEvidence[] = [];
   private lastRunAt: string | null = null;
+  /**
+   * 待更新集（路径 → 它最后一次变化的时刻）。放在插件上而不是监听器里：
+   * 改设置会重启监听、开关插件会重建监听器，待更新的东西不该跟着一起丢。
+   */
+  private readonly watchDirty = new Map<string, number>();
   private pendingCount = 0;
   private busy = false;
   private watcherKey = "";
@@ -114,6 +120,9 @@ export default class VaultLinkerPlugin extends Plugin {
       this.startWatcher();
       if (this.settings.trigger.runOnStartup) {
         void this.run(this.settings.safety.dryRunByDefault ? "dry-run" : "apply", false, true);
+      } else {
+        // 开着自动更新才需要对账（没开监听就没有"待处理"这回事）
+        void this.reconcileOnStartup();
       }
     });
   }
@@ -153,10 +162,34 @@ export default class VaultLinkerPlugin extends Plugin {
       },
       // 返回引擎自己写过的路径，让监听层能区分“运行期外部改动”与“自己的写入”
       onQuietReached: async () => await this.run(this.settings.trigger.autoApply ? "apply" : "dry-run", false, true),
-      registerInterval: (id) => this.registerInterval(id),
-    });
+    }, this.watchDirty);
     this.watcher.start();
     this.updateStatus();
+  }
+
+  /**
+   * 启动对账：只算不写，把和现状不一致的笔记投进待处理集。
+   *
+   * 为什么需要：快照基线是启动那一刻现拍的，光靠它会把「Obsidian 关着的时候被改过的笔记」
+   * 当成已处理，那批改动就永远丢了。这里算一遍「现在应该是什么样」，不一致的按各自 mtime
+   * 起算静置——很久没动过的那些立刻到点，重启后马上就补上。
+   */
+  private async reconcileOnStartup(): Promise<void> {
+    if (this.busy || !this.watcher) return;
+    try {
+      const s = await effectiveSettings(this.app, this.settings);
+      const plan = await planVault(this.app, s, todayIso());
+      const stale = plan.changedDocs.length;
+      this.watcher.reconcile(plan.changedDocs);
+      if (stale > 0) {
+        await this.appendLog(
+          `\n===== ${new Date().toISOString()} startup-reconcile =====\n` +
+            t(`启动对账：${stale} 篇笔记还没更新，已加入待处理`, `${stale} notes are out of date and were queued`) + "\n",
+        );
+      }
+    } catch (e) {
+      console.error("[vault-linker]", e);
+    }
   }
 
   private updateStatus(): void {
@@ -255,7 +288,8 @@ export default class VaultLinkerPlugin extends Plugin {
           10000,
         );
       }
-      this.watcher?.resetBaseline();
+      // 这一轮（含手动运行）写过的内容当作已应用：待处理清零，基线跟到写完之后
+      this.watcher?.markApplied();
       this.updateStatus();
       return outcome?.writtenPaths ?? [];
     } catch (e) {

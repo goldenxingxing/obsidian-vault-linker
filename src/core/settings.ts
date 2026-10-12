@@ -146,9 +146,13 @@ export interface Settings {
     onFileChange: boolean;
     /** 自动运行时是否直接写入（false = 只出预览报告） */
     autoApply: boolean;
+    /** 轮询间隔（秒）：发现变更的下限；有待更新文件接近到点时按到点时间提前唤醒 */
     pollIntervalSec: number;
+    /**
+     * 静置时长（秒），**按文件算**：某个文件动过之后，它自己安静满这么久才轮到被刷新。
+     * 不是「全库安静」——否则任何一处无关改动都会把倒计时清零，等于永远不更新。
+     */
     quietPeriodSec: number;
-    stableScans: number;
     runOnStartup: boolean;
   };
 
@@ -377,7 +381,6 @@ export function defaultSettings(): Settings {
       autoApply: false,
       pollIntervalSec: 20,
       quietPeriodSec: 30,
-      stableScans: 2,
       runOnStartup: false,
     },
     safety: {

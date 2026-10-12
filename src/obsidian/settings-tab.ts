@@ -25,7 +25,7 @@ const SAVE_DEBOUNCE_MS = 400;
 
 const list = (v: string): string[] => v.split(",").map((x) => x.trim().replace(/^\/+|\/+$/g, "")).filter(Boolean);
 
-/** 「停下来多久后更新」的选项（秒） */
+/** 「改动后多久更新」的选项（秒） */
 const WAIT_CHOICES = [30, 60, 300, 900, 1800, 3600];
 
 function waitLabel(sec: number): string {
@@ -178,9 +178,9 @@ export class LinkerSettingTab extends PluginSettingTab {
         control: { type: "toggle", key: "autoUpdate" },
       },
       {
-        name: t("停下来多久后更新", "Wait after the last change"),
-        desc: t("这段时间里没有新的改动才更新。写得多、vault 大，可以设长一些。",
-          "Links are updated only after this long without new changes. Choose longer for large vaults or long writing sessions."),
+        name: t("改动后多久更新", "Wait after a note's last change"),
+        desc: t("每篇笔记各自计时：它最后一次改动之后过这么久，就刷新它。别的笔记还在改，不会把它往后推。",
+          "Each note is timed on its own: this long after its own last change, it is refreshed. Changes to other notes never push it back."),
         visible: () => this.s.trigger.onFileChange && this.s.trigger.autoApply,
         control: { type: "dropdown", key: "quietPeriodSec", options: waitOptions },
       },
