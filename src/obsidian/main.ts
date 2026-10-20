@@ -13,6 +13,7 @@ import { applySuggestions, detectPathDrift, type PathDrift, type RenameEvidence 
 import type { PlanOutput } from "../core/engine.ts";
 import { applyPlanObsidian, effectiveSettings, formatReport, planVault, type ApplyOutcome } from "./runner.ts";
 import { ChangeWatcher } from "./watch.ts";
+import { deserializeQueue, serializeQueue } from "./queue.ts";
 import { LinkerSettingTab } from "./settings-tab.ts";
 import { ReportModal } from "./report-modal.ts";
 import { EntityWizardModal } from "./wizard-modal.ts";
@@ -53,6 +54,7 @@ export default class VaultLinkerPlugin extends Plugin {
    * 改设置会重启监听、开关插件会重建监听器，待更新的东西不该跟着一起丢。
    */
   private readonly watchDirty = new Map<string, number>();
+  private queueSaveTimer: number | null = null;
   private pendingCount = 0;
   private busy = false;
   private watcherKey = "";
@@ -63,6 +65,7 @@ export default class VaultLinkerPlugin extends Plugin {
     // 界面语言跟随 Obsidian（命令名、提示、设置页、运行报告）
     setUiLocale(obsidianLocale());
     await this.loadSettings();
+    await this.restoreQueue();
     this.addSettingTab(new LinkerSettingTab(this.app, this));
     this.statusEl = this.addStatusBarItem();
     this.updateStatus();
@@ -118,6 +121,22 @@ export default class VaultLinkerPlugin extends Plugin {
       }));
 
       this.startWatcher();
+      // 加载留痕：让「插件到底加载了没有、当时什么配置」从日志上直接可查，
+      // 不用等出问题后靠 workspace.json 的 mtime 这类旁证倒推
+      void this.appendLog(
+        `\n===== ${new Date().toISOString()} session =====\n` +
+          t(
+            `插件加载 v${this.manifest.version}：监听=${this.settings.trigger.onFileChange ? "开" : "关"}，` +
+              `自动写入=${this.settings.trigger.autoApply ? "开" : "关"}，` +
+              `启动即跑=${this.settings.trigger.runOnStartup ? "开" : "关"}，` +
+              `恢复待处理 ${this.watchDirty.size} 篇`,
+            `plugin loaded v${this.manifest.version}: watch=${this.settings.trigger.onFileChange ? "on" : "off"}, ` +
+              `autoApply=${this.settings.trigger.autoApply ? "on" : "off"}, ` +
+              `runOnStartup=${this.settings.trigger.runOnStartup ? "on" : "off"}, ` +
+              `${this.watchDirty.size} pending restored`,
+          ) +
+          "\n",
+      );
       if (this.settings.trigger.runOnStartup) {
         void this.run(this.settings.safety.dryRunByDefault ? "dry-run" : "apply", false, true);
       } else {
@@ -130,6 +149,9 @@ export default class VaultLinkerPlugin extends Plugin {
   override onunload(): void {
     this.watcher?.stop();
     this.watcher = null;
+    if (this.queueSaveTimer !== null) window.clearTimeout(this.queueSaveTimer);
+    // 关 vault 前把待更新集落盘：否则对账入队后秒关 vault，这批就无声丢了
+    void this.saveQueue();
   }
 
   async loadSettings(): Promise<void> {
@@ -159,6 +181,7 @@ export default class VaultLinkerPlugin extends Plugin {
       onPendingChange: (n) => {
         this.pendingCount = n;
         this.updateStatus();
+        this.scheduleQueueSave();
       },
       // 返回引擎自己写过的路径，让监听层能区分“运行期外部改动”与“自己的写入”
       onQuietReached: async () => await this.run(this.settings.trigger.autoApply ? "apply" : "dry-run", false, true),
@@ -181,14 +204,20 @@ export default class VaultLinkerPlugin extends Plugin {
       const plan = await planVault(this.app, s, todayIso());
       const stale = plan.changedDocs.length;
       this.watcher.reconcile(plan.changedDocs);
-      if (stale > 0) {
-        await this.appendLog(
-          `\n===== ${new Date().toISOString()} startup-reconcile =====\n` +
-            t(`启动对账：${stale} 篇笔记还没更新，已加入待处理`, `${stale} notes are out of date and were queued`) + "\n",
-        );
-      }
+      this.scheduleQueueSave();
+      // 无论有没有待更新都留痕：0 篇也是一次真实跑过的对账，是和「对账根本没执行」区分的唯一凭据
+      await this.appendLog(
+        `\n===== ${new Date().toISOString()} startup-reconcile =====\n` +
+          t(
+            stale > 0 ? `启动对账：${stale} 篇笔记还没更新，已加入待处理` : "启动对账：无待更新笔记",
+            stale > 0 ? `${stale} notes are out of date and were queued` : "startup reconcile: nothing pending",
+          ) +
+          "\n",
+      );
     } catch (e) {
       console.error("[vault-linker]", e);
+      // 异常也要落盘：只进 console 的报错在 Obsidian 里等于丢进黑洞，事后无法区分「没找到」和「崩了」
+      await this.appendLog(`\n===== ${new Date().toISOString()} reconcile ERROR =====\n${String(e)}\n${(e as Error).stack ?? ""}\n`);
     }
   }
 
@@ -203,6 +232,43 @@ export default class VaultLinkerPlugin extends Plugin {
   logPath(): string {
     const dir = this.manifest.dir ?? `${this.app.vault.configDir}/plugins/${this.manifest.id}`;
     return `${dir}/vault-linker.log`;
+  }
+
+  queuePath(): string {
+    const dir = this.manifest.dir ?? `${this.app.vault.configDir}/plugins/${this.manifest.id}`;
+    return `${dir}/queue.json`;
+  }
+
+  /** 把上次会话没跑完的待更新读回来（queue.ts 里坏文件/未来时刻都已兜底） */
+  private async restoreQueue(): Promise<void> {
+    try {
+      const adapter = this.app.vault.adapter;
+      const p = this.queuePath();
+      if (!(await adapter.exists(p))) return;
+      const restored = deserializeQueue(await adapter.read(p));
+      for (const [path, ts] of restored) {
+        if (!this.watchDirty.has(path)) this.watchDirty.set(path, ts);
+      }
+    } catch {
+      /* 恢复失败不阻塞加载：下一轮轮询照样能发现变更 */
+    }
+  }
+
+  /** 待更新集有变化后延迟落盘（合并连续抖动），vault 关掉也不丢队列 */
+  private scheduleQueueSave(): void {
+    if (this.queueSaveTimer !== null) window.clearTimeout(this.queueSaveTimer);
+    this.queueSaveTimer = window.setTimeout(() => {
+      this.queueSaveTimer = null;
+      void this.saveQueue();
+    }, 3000);
+  }
+
+  private async saveQueue(): Promise<void> {
+    try {
+      await this.app.vault.adapter.write(this.queuePath(), serializeQueue(this.watchDirty));
+    } catch {
+      /* 存失败下次再存；队列只是加速器，丢了不致命 */
+    }
   }
 
   private async appendLog(text: string): Promise<void> {
@@ -290,6 +356,7 @@ export default class VaultLinkerPlugin extends Plugin {
       }
       // 这一轮（含手动运行）写过的内容当作已应用：待处理清零，基线跟到写完之后
       this.watcher?.markApplied();
+      this.scheduleQueueSave();
       this.updateStatus();
       return outcome?.writtenPaths ?? [];
     } catch (e) {
