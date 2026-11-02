@@ -11,7 +11,8 @@ import {
 import { migrateAutoAccepted } from "../core/config-text.ts";
 import { applySuggestions, detectPathDrift, type PathDrift, type RenameEvidence } from "../core/reorg.ts";
 import type { PlanOutput } from "../core/engine.ts";
-import { applyPlanObsidian, effectiveSettings, formatReport, planVault, type ApplyOutcome } from "./runner.ts";
+import { applyPlanObsidian, effectiveSettings, formatReport, planVault, setBoundaryRealpath, type ApplyOutcome } from "./runner.ts";
+import { getBoundaryRealpath } from "./boundary.ts";
 import { ChangeWatcher } from "./watch.ts";
 import { deserializeQueue, serializeQueue } from "./queue.ts";
 import { LinkerSettingTab } from "./settings-tab.ts";
@@ -64,6 +65,8 @@ export default class VaultLinkerPlugin extends Plugin {
   override async onload(): Promise<void> {
     // 界面语言跟随 Obsidian（命令名、提示、设置页、运行报告）
     setUiLocale(obsidianLocale());
+    // 桌面注入 realpath（边界过滤）：必须在任何 planVault 之前，故放在 onload 开头
+    setBoundaryRealpath(await getBoundaryRealpath());
     await this.loadSettings();
     await this.restoreQueue();
     this.addSettingTab(new LinkerSettingTab(this.app, this));

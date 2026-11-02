@@ -39,6 +39,9 @@ export interface VaultLike {
   adapter: {
     exists(path: string): Promise<boolean>;
     read(path: string): Promise<string>;
+    /** FileSystemAdapter 的 vault 根绝对路径：realpath 边界过滤用（仅桌面） */
+    basePath?: string;
+    getBasePath?(): string;
   };
 }
 
@@ -67,6 +70,8 @@ export interface ApplyOutcome {
   skippedOpen: string[];
   /** 写入失败的 MOC（路径被文件夹占用，或 Obsidian 拒绝写入） */
   mocFailed: string[];
+  /** 写入失败的正文笔记（系统文件 EPERM、vault.process 抛错等）：跳过并继续，不再中断整轮 */
+  noteFailed: string[];
   /** 移到回收站的旧索引页 */
   mocRemoved: string[];
   /** 引擎自己写过的路径（含 MOC）——监听层用它区分“外部改动”，避免白跑 */
@@ -93,8 +98,69 @@ export async function readVaultText(app: AppLike, path: string): Promise<string 
   }
 }
 
+/**
+ * 由 main.ts 在 onload 时注入的 realpath（桌面 Electron 内置 Node 提供）。
+ * null = 关闭边界过滤：移动端 / 受限环境没有 node:fs，退化为仅写入容错。
+ */
+let boundaryRealpath: ((p: string) => Promise<string>) | null = null;
+
+/** 注入桌面 realpath（测试不注入，保持不过滤，走假 vault） */
+export function setBoundaryRealpath(fn: ((p: string) => Promise<string>) | null): void {
+  boundaryRealpath = fn;
+}
+
+/**
+ * 用 realpath 判定哪些文件解析后仍落在 vault 根之内。
+ * 返回 kept（vault 内）与 outside（符号链接逃逸到 vault 根之外）。
+ * 单个文件 realpath 失败（权限/不存在）时不误伤，按 kept 处理；
+ * vault 根解析失败时整体不过滤。纯逻辑 + 注入 realpath，便于在 Node 里用真实临时目录测试。
+ */
+export async function splitOutsideVault(
+  allFiles: readonly string[],
+  basePath: string,
+  realpath: (p: string) => Promise<string>,
+): Promise<{ kept: string[]; outside: string[] }> {
+  const base = basePath.replace(/\/+$/, "");
+  let vaultReal: string;
+  try {
+    vaultReal = await realpath(base);
+  } catch {
+    return { kept: [...allFiles], outside: [] }; // 根解析失败 → 不过滤
+  }
+  const kept: string[] = [];
+  const outside: string[] = [];
+  for (const p of allFiles) {
+    const rel = p.replace(/^\/+/, "");
+    let real: string;
+    try {
+      real = await realpath(base + "/" + rel);
+    } catch {
+      kept.push(p); // 解析失败 → 保留，不误伤
+      continue;
+    }
+    if (real === vaultReal || real.startsWith(vaultReal + "/")) kept.push(p);
+    else outside.push(p);
+  }
+  return { kept, outside };
+}
+
+/** 取 vault 文件列表并做 realpath 边界过滤（注入过 realpath 时）；否则原样返回 */
+async function vaultFileList(app: AppLike): Promise<{ files: string[]; outside: string[] }> {
+  const files = app.vault.getFiles().map((f) => f.path);
+  const realpathFn = boundaryRealpath;
+  const adapter = app.vault.adapter as { basePath?: string; getBasePath?(): string };
+  const basePath = adapter.basePath ?? adapter.getBasePath?.();
+  if (!realpathFn || !basePath) return { files, outside: [] };
+  try {
+    const r = await splitOutsideVault(files, basePath, realpathFn);
+    return { files: r.kept, outside: r.outside };
+  } catch {
+    return { files, outside: [] };
+  }
+}
+
 export async function buildEngineInput(app: AppLike, s: Settings, today: string): Promise<EngineInput> {
-  const allFiles = app.vault.getFiles().map((f) => f.path);
+  const { files: allFiles, outside: outsideVault } = await vaultFileList(app);
   const { inScope, excludedCount } = collectInScope(allFiles, s);
 
   const contents = new Map<string, string>();
@@ -121,6 +187,7 @@ export async function buildEngineInput(app: AppLike, s: Settings, today: string)
     skippedBinary,
     excludedCount,
     mocContents,
+    outsideVault,
   };
 }
 
@@ -146,8 +213,10 @@ export async function effectiveSettings(app: AppLike, s: Settings): Promise<Sett
  */
 export async function planVault(app: AppLike, s: Settings, today: string): Promise<PlanOutput> {
   const run = { ...s };
-  ensureDomains(run, app.vault.getFiles().map((f) => f.path));
-  return drivePlan(await buildEngineInput(app, run, today));
+  const input = await buildEngineInput(app, run, today);
+  // 用边界过滤后的文件建领域：避免符号链接逃逸目录（如 /Applications）被当成领域
+  ensureDomains(run, input.allFiles);
+  return drivePlan(input);
 }
 
 /**
@@ -165,7 +234,7 @@ export async function drivePlan(input: EngineInput): Promise<PlanOutput> {
 
 /** 为 E4 候选发现准备文档集（标题 / tags / 正文） */
 export async function buildDiscoverDocs(app: AppLike, s: Settings): Promise<DiscoverDoc[]> {
-  const allFiles = app.vault.getFiles().map((f) => f.path);
+  const { files: allFiles } = await vaultFileList(app);
   const { inScope } = collectInScope(allFiles, s);
   const docs: DiscoverDoc[] = [];
   for (const rel of inScope) {
@@ -217,6 +286,7 @@ export async function applyPlanObsidian(
     protectionExternal: [],
     restored: [],
     skippedOpen: [],
+    noteFailed: [],
   };
 
   for (const rel of plan.changedDocs) {
@@ -231,17 +301,23 @@ export async function applyPlanObsidian(
 
     let skipped = false;
     let raw = orig;
-    await app.vault.process(file as never, (cur) => {
-      // vault.process 在写前发现文件被并发修改时会**重跑回调**，
-      // 因此每次都重置标记，否则上一次的 skipped 会污染本次结果
-      skipped = false;
-      raw = cur;
-      if (s.safety.skipIfChanged && pyUniversalNewlines(cur) !== orig) {
-        skipped = true;
-        return cur;
-      }
-      return withOriginalEol(target, cur);
-    });
+    try {
+      await app.vault.process(file as never, (cur) => {
+        // vault.process 在写前发现文件被并发修改时会**重跑回调**，
+        // 因此每次都重置标记，否则上一次的 skipped 会污染本次结果
+        skipped = false;
+        raw = cur;
+        if (s.safety.skipIfChanged && pyUniversalNewlines(cur) !== orig) {
+          skipped = true;
+          return cur;
+        }
+        return withOriginalEol(target, cur);
+      });
+    } catch {
+      // 单个正文写不进（系统文件 EPERM、Obsidian 拒绝写入等）不该拖垮其余：记下并继续
+      out.noteFailed.push(rel);
+      continue;
+    }
     if (skipped) {
       out.skipped.push(rel);
       continue;
@@ -309,6 +385,10 @@ export function formatReport(
   lines.push(t(`扫描 .md: ${r.scanned} 在范围 + ${r.excluded} 排除`, `Notes: ${r.scanned} in scope, ${r.excluded} excluded`) +
     (r.skippedBinary ? t(`（非 UTF-8 跳过 ${r.skippedBinary}）`, ` (${r.skippedBinary} skipped: not UTF-8)`) : ""));
   lines.push(t("领域分布: ", "Areas: ") + r.domains.map((d) => `${d.name}=${d.count}`).join(", "));
+  if (r.outsideVault > 0) {
+    lines.push(t(`排除 vault 边界外文件 ${r.outsideVault} 篇（符号链接指向 vault 根之外，未处理）`,
+      `Excluded ${r.outsideVault} notes outside the vault root (symlinks pointing out of the vault)`));
+  }
   lines.push(t(`计划修改文档: ${r.plannedChanges} / ${r.scanned}`, `Notes to update: ${r.plannedChanges} / ${r.scanned}`));
   lines.push(t(`MOC 新建/更新: ${r.mocPlanned}`, `Index pages to write: ${r.mocPlanned}`));
   if (r.mocStale.length > 0) {
@@ -355,6 +435,11 @@ export function formatReport(
     if (outcome.mocFailed.length > 0) {
       lines.push(t(`!! MOC 写入失败 ${outcome.mocFailed.length} 个: `, `!! Index pages that could not be written: ${outcome.mocFailed.length}: `) +
         outcome.mocFailed.slice(0, 10).join(", "));
+    }
+    if (outcome.noteFailed.length > 0) {
+      lines.push(t(`!! 正文写入失败 ${outcome.noteFailed.length} 篇（已跳过，其余继续）: `,
+        `!! Notes that could not be written: ${outcome.noteFailed.length} (skipped, others continue): `) +
+        outcome.noteFailed.slice(0, 10).join(", "));
     }
     if (outcome.restored.length > 0) {
       lines.push(t(`!! 内容保护校验失败并已回滚 ${outcome.restored.length} 篇`, `!! Verification failed; restored ${outcome.restored.length} notes`));
