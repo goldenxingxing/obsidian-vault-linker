@@ -36,8 +36,6 @@ export interface EngineInput {
   excludedCount?: number;
   /** 当前 _moc/*.md 的内容（这些文件在扫描范围之外，需单独读取） */
   mocContents?: ReadonlyMap<string, string>;
-  /** 被 realpath 边界过滤剔除的 vault 外文件（符号链接逃逸到 vault 根之外） */
-  outsideVault?: readonly string[];
 }
 
 export interface EntityUsage {
@@ -51,8 +49,6 @@ export interface RunReport {
   scanned: number;
   excluded: number;
   skippedBinary: number;
-  /** 因解析后落在 vault 根之外（符号链接逃逸）而被排除的 md 数量 */
-  outsideVault: number;
   domains: Array<{ id: string; name: string; count: number }>;
   plannedChanges: number;
   mocPlanned: number;
@@ -300,7 +296,6 @@ export function* planSteps(input: EngineInput): Generator<void, PlanOutput, void
     scanned: rels.length,
     excluded: (input.excludedCount ?? 0) + pluginFiles.length,
     skippedBinary: input.skippedBinary?.length ?? 0,
-    outsideVault: input.outsideVault?.length ?? 0,
     domains: mocReport,
     plannedChanges: changedDocs.length,
     mocPlanned: mocChanges.size,

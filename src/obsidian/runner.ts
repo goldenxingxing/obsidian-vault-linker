@@ -98,69 +98,8 @@ export async function readVaultText(app: AppLike, path: string): Promise<string 
   }
 }
 
-/**
- * 由 main.ts 在 onload 时注入的 realpath（桌面 Electron 内置 Node 提供）。
- * null = 关闭边界过滤：移动端 / 受限环境没有 node:fs，退化为仅写入容错。
- */
-let boundaryRealpath: ((p: string) => Promise<string>) | null = null;
-
-/** 注入桌面 realpath（测试不注入，保持不过滤，走假 vault） */
-export function setBoundaryRealpath(fn: ((p: string) => Promise<string>) | null): void {
-  boundaryRealpath = fn;
-}
-
-/**
- * 用 realpath 判定哪些文件解析后仍落在 vault 根之内。
- * 返回 kept（vault 内）与 outside（符号链接逃逸到 vault 根之外）。
- * 单个文件 realpath 失败（权限/不存在）时不误伤，按 kept 处理；
- * vault 根解析失败时整体不过滤。纯逻辑 + 注入 realpath，便于在 Node 里用真实临时目录测试。
- */
-export async function splitOutsideVault(
-  allFiles: readonly string[],
-  basePath: string,
-  realpath: (p: string) => Promise<string>,
-): Promise<{ kept: string[]; outside: string[] }> {
-  const base = basePath.replace(/\/+$/, "");
-  let vaultReal: string;
-  try {
-    vaultReal = await realpath(base);
-  } catch {
-    return { kept: [...allFiles], outside: [] }; // 根解析失败 → 不过滤
-  }
-  const kept: string[] = [];
-  const outside: string[] = [];
-  for (const p of allFiles) {
-    const rel = p.replace(/^\/+/, "");
-    let real: string;
-    try {
-      real = await realpath(base + "/" + rel);
-    } catch {
-      kept.push(p); // 解析失败 → 保留，不误伤
-      continue;
-    }
-    if (real === vaultReal || real.startsWith(vaultReal + "/")) kept.push(p);
-    else outside.push(p);
-  }
-  return { kept, outside };
-}
-
-/** 取 vault 文件列表并做 realpath 边界过滤（注入过 realpath 时）；否则原样返回 */
-async function vaultFileList(app: AppLike): Promise<{ files: string[]; outside: string[] }> {
-  const files = app.vault.getFiles().map((f) => f.path);
-  const realpathFn = boundaryRealpath;
-  const adapter = app.vault.adapter as { basePath?: string; getBasePath?(): string };
-  const basePath = adapter.basePath ?? adapter.getBasePath?.();
-  if (!realpathFn || !basePath) return { files, outside: [] };
-  try {
-    const r = await splitOutsideVault(files, basePath, realpathFn);
-    return { files: r.kept, outside: r.outside };
-  } catch {
-    return { files, outside: [] };
-  }
-}
-
 export async function buildEngineInput(app: AppLike, s: Settings, today: string): Promise<EngineInput> {
-  const { files: allFiles, outside: outsideVault } = await vaultFileList(app);
+  const allFiles = app.vault.getFiles().map((f) => f.path);
   const { inScope, excludedCount } = collectInScope(allFiles, s);
 
   const contents = new Map<string, string>();
@@ -187,7 +126,6 @@ export async function buildEngineInput(app: AppLike, s: Settings, today: string)
     skippedBinary,
     excludedCount,
     mocContents,
-    outsideVault,
   };
 }
 
@@ -234,7 +172,7 @@ export async function drivePlan(input: EngineInput): Promise<PlanOutput> {
 
 /** 为 E4 候选发现准备文档集（标题 / tags / 正文） */
 export async function buildDiscoverDocs(app: AppLike, s: Settings): Promise<DiscoverDoc[]> {
-  const { files: allFiles } = await vaultFileList(app);
+  const allFiles = app.vault.getFiles().map((f) => f.path);
   const { inScope } = collectInScope(allFiles, s);
   const docs: DiscoverDoc[] = [];
   for (const rel of inScope) {
@@ -385,10 +323,6 @@ export function formatReport(
   lines.push(t(`扫描 .md: ${r.scanned} 在范围 + ${r.excluded} 排除`, `Notes: ${r.scanned} in scope, ${r.excluded} excluded`) +
     (r.skippedBinary ? t(`（非 UTF-8 跳过 ${r.skippedBinary}）`, ` (${r.skippedBinary} skipped: not UTF-8)`) : ""));
   lines.push(t("领域分布: ", "Areas: ") + r.domains.map((d) => `${d.name}=${d.count}`).join(", "));
-  if (r.outsideVault > 0) {
-    lines.push(t(`排除 vault 边界外文件 ${r.outsideVault} 篇（符号链接指向 vault 根之外，未处理）`,
-      `Excluded ${r.outsideVault} notes outside the vault root (symlinks pointing out of the vault)`));
-  }
   lines.push(t(`计划修改文档: ${r.plannedChanges} / ${r.scanned}`, `Notes to update: ${r.plannedChanges} / ${r.scanned}`));
   lines.push(t(`MOC 新建/更新: ${r.mocPlanned}`, `Index pages to write: ${r.mocPlanned}`));
   if (r.mocStale.length > 0) {
