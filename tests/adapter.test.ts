@@ -353,20 +353,21 @@ test("ChangeWatcher：没写成的笔记（跳过打开/写入失败）跑完后
   watcher.reconcile(["eng/a.md", "eng/b.md"]);
   assert.equal(dirty.size, 2, "对账把两篇都投进待处理");
 
-  // 模拟 fire()：运行前先清空，然后这一轮 a 没写成功（正在打开）、b 写成功了
+  // 模拟 fire()：运行前先清空，然后这一轮 a 没写成功（正在打开）、b 写成功了。
+  // 新行为：skippedOpen 保留**原计时**（到期自然写入），不再重算到“现在”（否则越滑越远）。
+  const aAt = dirty.get("eng/a.md") as number;
   dirty.clear();
-  watcher.markApplied(["eng/a.md"]);
+  watcher.markApplied(new Map([["eng/a.md", aAt]]));
   assert.equal(watcher.pendingCount(), 1, "没写成的 a 必须还在待处理里");
   assert.ok(dirty.has("eng/a.md"), "a 没被清掉");
   assert.ok(!dirty.has("eng/b.md"), "写成功的 b 被清掉");
-  // 计时从现在重算：不会因为旧时间戳立即到点而对打开的笔记空转
-  assert.ok(Math.abs((dirty.get("eng/a.md") as number) - Date.now()) < 5000, "a 的计时被重算为现在");
+  assert.equal(dirty.get("eng/a.md"), aAt, "a 的计时保持原值，不被重算为现在（不再滑移）");
 
-  // 全部没写成功 → 全部保留；再传空 → 全部清空
+  // 全部没写成功 → 全部保留；再传空 Map → 全部清空
   dirty.clear();
-  watcher.markApplied(["eng/a.md", "eng/b.md"]);
+  watcher.markApplied(new Map([["eng/a.md", aAt], ["eng/b.md", aAt]]));
   assert.equal(watcher.pendingCount(), 2, "两篇都没写成 → 都留在待处理");
-  watcher.markApplied();
+  watcher.markApplied(undefined);
   assert.equal(watcher.pendingCount(), 0, "传空 → 全部清空");
 
   watcher.stop();

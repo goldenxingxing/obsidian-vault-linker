@@ -28,7 +28,7 @@
 import type { App } from "obsidian";
 import type { Settings } from "../core/settings.ts";
 import { globMatch } from "../core/scope.ts";
-import { msUntilDue, touch, touchedPaths, type Snapshot } from "../core/schedule.ts";
+import { duePaths, msUntilDue, touch, touchedPaths, type Snapshot } from "../core/schedule.ts";
 import type { AppLike } from "./runner.ts";
 
 export type { Snapshot };
@@ -51,10 +51,18 @@ const RUN_STUCK_MS = 15 * 60 * 1000;
  */
 const OVERDUE_SLACK_MS = 5000;
 
+export interface QuietCtx {
+  /** 当前已到静置期的路径：调用方可据此只跳过“打开中且未到点”的（正在编辑） */
+  due: ReadonlySet<string>;
+  /** 本轮运行**前**的队列快照（path → changedAt）：供 markApplied 保留“原计时”而不重算 */
+  originals: ReadonlyMap<string, number>;
+}
+
 export interface WatchEvents {
   onPendingChange: (count: number) => void;
-  /** 运行一次引擎；返回值 = 引擎**自己写过**的路径（用于区分外部改动，可为 void） */
-  onQuietReached: () => Promise<readonly string[] | void>;
+  /** 运行一次引擎；参数见 {@link QuietCtx}。
+   *  返回值 = 引擎**自己写过**的路径（用于区分外部改动，可为 void） */
+  onQuietReached: (ctx: QuietCtx) => Promise<readonly string[] | void>;
   /** 心跳/tick 内部异常留痕（可选；别让它抛，否则会打断自愈） */
   onTickError?: (message: string) => void;
 }
@@ -164,26 +172,18 @@ export class ChangeWatcher {
   /**
    * 一轮运行之后调用：把当前状态当成「已应用」，更新基线。
    *
-   * @param keep 这次**没写成功**、但仍待更新的路径（自动运行时正在编辑器里打开的笔记，
-   *   以及写入时内容已变 / 写入失败的笔记）。这些不该从待处理里消失——否则它们永远不会被
-   *   补上，状态栏和「待处理笔记」弹窗也再也看不到它们。保留项的计时从「现在」重算，让它们
-   *   在静置期之后再试：旧时间戳会让 msUntilDue 立即为 0，对打开的笔记造成「再跑→再跳过」空转。
+   * @param keep 本轮**没写成功**、但仍待更新的路径及各自的 changedAt（见 {@link QuietCtx.originals}）。
+   *   —— 打开中被跳过的（skippedOpen）保持**原计时**（到期自然写入，不会越滑越远）；
+   *   —— 写入时内容已变 / 写入失败的（skipped / noteFailed）用「现在」，静置期后再试。
+   *   这些都不该从待处理里消失——否则它们永远不会被补上。
    *
-   * 不传或传空：全部清空（这一轮确实都应用了）。手动运行（命令 / 设置页按钮）的写入也要算
+   * 传空 Map：全部清空（这一轮确实都应用了）。手动运行（命令 / 设置页按钮）的写入也要算
    * 进来，否则插件自己的产物会被下一轮轮询当成外部改动，白跑一轮、状态栏还一直挂着"待处理"。
    */
-  markApplied(keep?: Iterable<string>): void {
+  markApplied(keep: ReadonlyMap<string, number> | undefined): void {
     this.baseline = this.snapshot();
-    const keepSet = keep ? new Set(keep) : null;
-    const now = Date.now();
-    if (keepSet && keepSet.size > 0) {
-      for (const p of [...this.dirty.keys()]) if (!keepSet.has(p)) this.dirty.delete(p);
-      // dirty 可能已被 fire() 在运行前清空（fire 先 clear 再跑 onQuietReached），
-      // 所以这里直接 set 即可：保留项无论如何都要回到待处理里。
-      for (const p of keepSet) this.dirty.set(p, now);
-    } else {
-      this.dirty.clear();
-    }
+    this.dirty.clear();
+    if (keep) for (const [p, at] of keep) this.dirty.set(p, at);
     this.reportPending();
   }
 
@@ -318,9 +318,15 @@ export class ChangeWatcher {
       // 引擎自己写过的路径要排除，否则每次有产出都会白跑一轮。
       for (let attempt = 0; attempt < MAX_IMMEDIATE_RERUNS; attempt++) {
         const before = this.snapshot();
+        const now = Date.now();
+        const quietMs = Math.max(1, this.settings.trigger.quietPeriodSec) * 1000;
+        // 运行前的队列快照：markApplied 用它保留 skippedOpen 的“原计时”，避免越滑越远
+        const originals = new Map(this.dirty);
+        // 打开中但已停手静置满的文件也算“到点”：调用方据此只跳过“打开中且未到点的”
+        const due = duePaths(this.dirty, now, quietMs);
         // 这一轮会把当前所有待更新都覆盖掉，先清脏集；运行期的外部改动下面再放回去
         this.dirty.clear();
-        const written = await this.events.onQuietReached();
+        const written = await this.events.onQuietReached({ due, originals });
         const selfWritten = new Set(written ?? []);
         const after = this.snapshot();
         this.baseline = after;

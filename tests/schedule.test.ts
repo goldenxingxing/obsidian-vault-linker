@@ -7,7 +7,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import { touchedPaths, touch, msUntilDue, type Snapshot } from "../src/core/schedule.ts";
+import { duePaths, touchedPaths, touch, msUntilDue, type Snapshot } from "../src/core/schedule.ts";
 
 const sig = (mtime: number, size: number) => ({ mtime, size });
 
@@ -59,4 +59,18 @@ test("msUntilDue：别的文件一直在动，不会推迟已经静置够久的�
     ["刚改的.md", now - 1], // 刚刚动过，还差很久
   ]);
   assert.equal(msUntilDue(dirty, now, quietMs), 0, "旧的「全库安静」实现会被刚改的那个无限推迟");
+});
+
+test("duePaths：只挑出已到静置期的路径（打开中但停手静置满的也在其中，可放心写）", () => {
+  const quietMs = 3_600_000;
+  const now = 10_000_000;
+  const dirty = new Map([
+    ["到点.md", now - quietMs], // 恰好到点
+    ["没到点.md", now - 1], // 刚改，还差很久
+  ]);
+  assert.deepEqual([...duePaths(dirty, now, quietMs)], ["到点.md"]);
+});
+
+test("duePaths：空队列 → 空集", () => {
+  assert.equal(duePaths(new Map(), 0, 1000).size, 0);
 });

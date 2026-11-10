@@ -12,8 +12,9 @@ import { migrateAutoAccepted } from "../core/config-text.ts";
 import { applySuggestions, detectPathDrift, type PathDrift, type RenameEvidence } from "../core/reorg.ts";
 import type { PlanOutput } from "../core/engine.ts";
 import { applyPlanObsidian, effectiveSettings, formatReport, planVault, type ApplyOutcome } from "./runner.ts";
-import { ChangeWatcher } from "./watch.ts";
+import { ChangeWatcher, type QuietCtx } from "./watch.ts";
 import { deserializeQueue, serializeQueue } from "./queue.ts";
+import { duePaths } from "../core/schedule.ts";
 import { LinkerSettingTab } from "./settings-tab.ts";
 import { ReportModal } from "./report-modal.ts";
 import { PendingModal, type PendingItem } from "./pending-modal.ts";
@@ -192,8 +193,9 @@ export default class VaultLinkerPlugin extends Plugin {
         this.updateStatus();
         this.scheduleQueueSave();
       },
-      // 返回引擎自己写过的路径，让监听层能区分“运行期外部改动”与“自己的写入”
-      onQuietReached: async () => await this.run(this.settings.trigger.autoApply ? "apply" : "dry-run", false, true),
+      // 返回引擎自己写过的路径，让监听层能区分“运行期外部改动”与“自己的写入”。
+      // ctx.due = 已到静置期的路径；ctx.originals = 运行前的队列快照（供保留原计时）。
+      onQuietReached: async (ctx) => await this.run(this.settings.trigger.autoApply ? "apply" : "dry-run", false, true, ctx),
       // 心跳/轮询内部异常留痕：不落盘的话在 Obsidian 里等于丢进黑洞，事后无法区分“没找到”和“崩了”
       onTickError: (msg) => void this.appendLog(`\n===== ${new Date().toISOString()} watcher-ERROR =====\n${msg}\n`),
     }, this.watchDirty);
@@ -311,9 +313,11 @@ export default class VaultLinkerPlugin extends Plugin {
 
   /**
    * 跑一轮；返回**引擎自己写过**的路径（供监听层区分外部改动）
-   * @param auto 自动触发（监听 / 启动时）：跳过正在打开的笔记；手动运行则全部写
+   * @param auto 自动触发（监听 / 启动时）：默认跳过正在打开的笔记；手动运行则全部写。
+   * @param ctx 监听层上下文（due = 已到点路径；originals = 运行前队列快照）。自动运行时只跳过
+   *   “打开中且**未到点**”的（多半正在编辑）；打开中但已停手静置满的照写。未传时按当前队列现算。
    */
-  async run(mode: "dry-run" | "apply", notify: boolean, auto = false): Promise<readonly string[]> {
+  async run(mode: "dry-run" | "apply", notify: boolean, auto = false, ctx?: QuietCtx): Promise<readonly string[]> {
     if (this.busy) {
       if (notify) new Notice(t("Vault Linker Auto 正在运行中，请稍候…", "Vault Linker Auto is already running…"));
       return [];
@@ -332,7 +336,13 @@ export default class VaultLinkerPlugin extends Plugin {
       );
       let outcome: ApplyOutcome | undefined;
       if (mode === "apply") {
-        outcome = await applyPlanObsidian(this.app, plan, s, { skipOpen: auto ? this.openFiles() : undefined });
+        let skipOpen: ReadonlySet<string> | undefined;
+        if (auto) {
+          const dueSet = (ctx?.due ?? duePaths(this.watchDirty, Date.now(), Math.max(1, s.trigger.quietPeriodSec) * 1000));
+          // 只跳过“打开中且未到点”的（很可能正在编辑）；打开中但到点了就写（vault.process 安全）
+          skipOpen = new Set([...this.openFiles()].filter((p) => !dueSet.has(p)));
+        }
+        outcome = await applyPlanObsidian(this.app, plan, s, { skipOpen });
       }
       this.lastOutcome = outcome;
       this.lastRunAt = new Date().toLocaleTimeString();
@@ -366,12 +376,19 @@ export default class VaultLinkerPlugin extends Plugin {
         );
       }
       // 这一轮（含手动运行）写过的内容当作已应用，基线跟到写完之后；
-      // 但没写成的（正在打开的、写前内容已变的、写入失败的）不能跟着消失——它们得继续留在
-      // 待处理里，否则状态栏/「待处理笔记」再也看不到它们（此前正在打开的笔记会被静默吞掉、
-      // 永不补写，日志那句"关掉后下次运行补上"其实是假的）。
-      this.watcher?.markApplied(
-        outcome ? [...outcome.skippedOpen, ...outcome.skipped, ...outcome.noteFailed] : undefined,
-      );
+      // 但没写成的不能跟着消失——它们得继续留在待处理里，否则状态栏/「待处理笔记」再也看不到。
+      //   skippedOpen（打开中且未到点）：保留**原计时**（到期自然写入，不会越滑越远）；
+      //   skipped / noteFailed（内容已变 / 写失败）：计时重算到「现在」，静置期后再试。
+      if (outcome) {
+        const now = Date.now();
+        const originals = ctx?.originals ?? this.watchDirty;
+        const keep = new Map<string, number>();
+        for (const p of outcome.skippedOpen) keep.set(p, originals.get(p) ?? now);
+        for (const p of [...outcome.skipped, ...outcome.noteFailed]) keep.set(p, now);
+        this.watcher?.markApplied(keep);
+      } else {
+        this.watcher?.markApplied(undefined);
+      }
       this.scheduleQueueSave();
       this.updateStatus();
       return outcome?.writtenPaths ?? [];
@@ -412,11 +429,23 @@ export default class VaultLinkerPlugin extends Plugin {
     }).open();
   }
 
+  /** 文件的真实改动时刻（mtime，毫秒）；已删/非文件取不到时回退 null */
+  private realMtime(path: string): number | null {
+    const f = this.app.vault.getAbstractFileByPath(path) as { stat?: { mtime?: number } } | null;
+    const mtime = f?.stat?.mtime;
+    return typeof mtime === "number" ? mtime : null;
+  }
+
   /** 打开「待处理笔记」弹窗：把当前待更新集按路径+改动时刻列出来（快照，不触发运行） */
   showPending(): void {
     const quietMs = Math.max(1, this.settings.trigger.quietPeriodSec) * 1000;
     const items: PendingItem[] = [...this.watchDirty.entries()]
-      .map(([path, changedAt]) => ({ path, changedAt }))
+      .map(([path, changedAt]) => ({
+        path,
+        changedAt,
+        // 显示用真实改动时刻：队列里的 changedAt 对打开中被重试的笔记是"重试延时"，不是改动时间
+        mtime: this.realMtime(path) ?? changedAt,
+      }))
       .sort((a, b) => a.changedAt - b.changedAt);
     new PendingModal(
       this.app,

@@ -48,3 +48,10 @@ export function msUntilDue(dirty: ReadonlyMap<string, number>, now: number, quie
   }
   return min === Infinity ? null : Math.max(0, min);
 }
+
+/** 当前已到静置期的路径（dirty 里 at + quietMs <= now 的）——这些是可以放心写的 */
+export function duePaths(dirty: ReadonlyMap<string, number>, now: number, quietMs: number): Set<string> {
+  const out = new Set<string>();
+  for (const [path, at] of dirty) if (at + quietMs <= now) out.add(path);
+  return out;
+}

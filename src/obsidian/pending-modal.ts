@@ -10,7 +10,10 @@ import { App, Modal, Setting } from "obsidian";
 
 export interface PendingItem {
   path: string;
-  changedAt: number; // ms epoch：该笔记最后一次被改动、开始计静置的时刻
+  /** 队列里的计时基准 ms（静置到期 = changedAt + quietMs；打开中的笔记被重试时会延后） */
+  changedAt: number;
+  /** 文件真实改动时刻 ms（mtime）——显示用，避免把"重试延时"当成"改动时间" */
+  mtime: number;
 }
 
 function fmtTs(ts: number): string {
@@ -62,8 +65,8 @@ export class PendingModal extends Modal {
         li.createDiv({
           cls: "vault-linker-pending-meta",
           text: t(
-            `改动 ${fmtTs(it.changedAt)} · 静置至 ${fmtTs(due)} · 剩 ${fmtRemain(remain)}`,
-            `changed ${fmtTs(it.changedAt)} · quiet until ${fmtTs(due)} · ${fmtRemain(remain)} left`,
+            `改动 ${fmtTs(it.mtime)} · 静置至 ${fmtTs(due)} · 剩 ${fmtRemain(remain)}`,
+            `changed ${fmtTs(it.mtime)} · quiet until ${fmtTs(due)} · ${fmtRemain(remain)} left`,
           ),
         });
       }
