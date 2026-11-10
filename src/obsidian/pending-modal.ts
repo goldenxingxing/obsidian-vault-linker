@@ -1,0 +1,80 @@
+/**
+ * pending-modal.ts — 「待处理笔记」弹窗
+ *
+ * 把当前待更新集（watchDirty）按篇列出来：路径 + 改动时刻 + 静置到期时刻 + 剩余时间。
+ * 纯展示，打开瞬间的快照；不在这里触发任何运行/写入。
+ */
+
+import { t } from "./i18n.ts";
+import { App, Modal, Setting } from "obsidian";
+
+export interface PendingItem {
+  path: string;
+  changedAt: number; // ms epoch：该笔记最后一次被改动、开始计静置的时刻
+}
+
+function fmtTs(ts: number): string {
+  return new Date(ts).toLocaleString();
+}
+
+/** 剩余时间的简短表示：53s / 53m / 1h5m */
+function fmtRemain(ms: number): string {
+  const sec = Math.round(ms / 1000);
+  if (sec < 60) return `${sec}s`;
+  const min = Math.floor(sec / 60);
+  if (min < 60) return `${min}m`;
+  const h = Math.floor(min / 60);
+  const m = min % 60;
+  return `${h}h${m > 0 ? `${m}m` : ""}`;
+}
+
+/** 待处理笔记列表弹窗 */
+export class PendingModal extends Modal {
+  private readonly title: string;
+  private readonly items: readonly PendingItem[];
+  private readonly quietMs: number;
+
+  constructor(app: App, title: string, items: readonly PendingItem[], quietMs: number) {
+    super(app);
+    this.title = title;
+    this.items = items;
+    this.quietMs = quietMs;
+  }
+
+  override onOpen(): void {
+    const { contentEl } = this;
+    contentEl.empty();
+    this.titleEl.setText(this.title);
+
+    if (this.items.length === 0) {
+      contentEl.createEl("p", {
+        cls: "setting-item-description",
+        text: t("当前没有待处理的笔记。", "No notes are waiting to be processed."),
+      });
+    } else {
+      const list = contentEl.createEl("ul", { cls: "vault-linker-pending" });
+      const now = Date.now();
+      for (const it of this.items) {
+        const due = it.changedAt + this.quietMs;
+        const remain = Math.max(0, due - now);
+        const li = list.createEl("li", { cls: "vault-linker-pending-row" });
+        li.createSpan({ cls: "vault-linker-pending-path", text: it.path });
+        li.createDiv({
+          cls: "vault-linker-pending-meta",
+          text: t(
+            `改动 ${fmtTs(it.changedAt)} · 静置至 ${fmtTs(due)} · 剩 ${fmtRemain(remain)}`,
+            `changed ${fmtTs(it.changedAt)} · quiet until ${fmtTs(due)} · ${fmtRemain(remain)} left`,
+          ),
+        });
+      }
+    }
+
+    new Setting(contentEl).addButton((b) =>
+      b.setButtonText(t("关闭", "Close")).onClick(() => this.close()),
+    );
+  }
+
+  override onClose(): void {
+    this.contentEl.empty();
+  }
+}

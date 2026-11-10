@@ -1,5 +1,5 @@
 /**
- * watch.ts — 变更监听（轮询 + 逐文件静置）
+ * watch.ts — 变更监听（轮询 + 逐文件静置，自愈式）
  *
  * 为什么用轮询而不是纯事件：Obsidian 的 vault 事件基于 Node fs.watch，
  * 对外部进程（AI agent、脚本）创建的文件**不可靠**（社区已定位：事件会丢，
@@ -13,6 +13,16 @@
  *     （引擎自己写过的路径不算，否则每次有产出都会白跑一轮）
  *
  * 脏集由调用方持有（插件的 watchDirty），所以因为改设置而重启监听不会把待更新丢掉。
+ *
+ * 为什么是「单发 setTimeout 链 + 看门狗」，而不是裸 setInterval：
+ *   单发链能按"最早到点的文件"精确排下一次检查（到点就跑，不被轮询间隔量化）；
+ *   代价是它靠"这次回调里排下次"延续，任何一环断掉整条链就死了，插件从此
+ *   "配置里开着却再也不跑"——这就是本插件反复"好像又停用了"的根因。
+ *   所以这里给链上了两道保险：
+ *     1. tick/fire 内部一律 try/catch，无论抛什么，finally 都重新排下一次 → 异常断不了链；
+ *     2. 一条 **setInterval 看门狗** 自走：发现排队的检查已严重超时（定时器被渲染进程
+ *        静默丢掉）或整条链许久没动，就清掉重建。setInterval 一旦启动就自走，
+ *        不受"某次回调是否成功"影响，专门兜底"单发定时器不触发"这一类无声故障。
  */
 
 import type { App } from "obsidian";
@@ -32,21 +42,39 @@ const WAKE_MS = 1000;
 /** 两次检查的最短间隔，防止事件密集时把主线程拖进忙等 */
 const MIN_CHECK_MS = 250;
 
+/** 单轮 run() 的软上限：超过就认为卡死了（全库扫描 + 写盘不该这么久），强制解围 */
+const RUN_STUCK_MS = 15 * 60 * 1000;
+
+/**
+ * 看门狗判定"排队中的检查已经死了"的宽容量：一个 setTimeout 早该触发却没触发，
+ * 说明定时器被静默丢了（渲染进程节流/后台丢定时器），需要重建。
+ */
+const OVERDUE_SLACK_MS = 5000;
+
 export interface WatchEvents {
   onPendingChange: (count: number) => void;
   /** 运行一次引擎；返回值 = 引擎**自己写过**的路径（用于区分外部改动，可为 void） */
   onQuietReached: () => Promise<readonly string[] | void>;
+  /** 心跳/tick 内部异常留痕（可选；别让它抛，否则会打断自愈） */
+  onTickError?: (message: string) => void;
 }
 
 export class ChangeWatcher {
+  /** 下一次检查的单发定时器（按最早到点精确排期） */
   private timer: number | null = null;
-  /** 当前这次检查被安排在什么时刻（用来让 wake 只提前、不推迟） */
+  /** 当前这次检查被安排在什么时刻（用来让 wake 只提前、不推迟，也让看门狗识别"超时未触发"） */
   private timerDueAt = 0;
+  /** 看门狗：自走的 setInterval，负责在单发链死掉时把它救回来 */
+  private watchdog: number | null = null;
+  /** 最近一次真正执行过 tick 的时刻：看门狗据此判断"整条链许久没动" */
+  private lastTickAt = 0;
   private baseline: Snapshot = new Map();
   private running = false;
   private active = false;
   /** 已上报过的待处理数：避免每一轮轮询都去刷一遍状态栏 */
   private reported = 0;
+  /** 最近一次 run() 开始时刻；配合 RUN_STUCK_MS 做看门狗 */
+  private runStartedAt = 0;
   private readonly dirty: Map<string, number>;
   private readonly app: AppLike;
   private readonly settings: Settings;
@@ -90,13 +118,21 @@ export class ChangeWatcher {
     this.active = true;
     this.baseline = this.snapshot();
     this.reportPending();
+    this.lastTickAt = Date.now();
     this.scheduleCheck();
+    this.startWatchdog();
   }
 
   stop(): void {
     this.active = false;
-    if (this.timer !== null) window.clearTimeout(this.timer);
-    this.timer = null;
+    if (this.timer !== null) {
+      window.clearTimeout(this.timer);
+      this.timer = null;
+    }
+    if (this.watchdog !== null) {
+      window.clearInterval(this.watchdog);
+      this.watchdog = null;
+    }
   }
 
   /**
@@ -117,6 +153,7 @@ export class ChangeWatcher {
     }
     this.reportPending();
     this.scheduleCheck();
+    this.startWatchdog();
   }
 
   /** 事件提示：提前看一眼（判定仍在 tick 里，避免把插件自己的写入当成外部改动） */
@@ -125,14 +162,67 @@ export class ChangeWatcher {
   }
 
   /**
-   * 一轮运行之后调用：把当前状态当成「已应用」，清空待处理。
-   * 手动运行（命令 / 设置页按钮）的写入也要算进来，否则插件自己的产物会被下一轮轮询
-   * 当成外部改动，白跑一轮、状态栏还一直挂着"待处理"。
+   * 一轮运行之后调用：把当前状态当成「已应用」，更新基线。
+   *
+   * @param keep 这次**没写成功**、但仍待更新的路径（自动运行时正在编辑器里打开的笔记，
+   *   以及写入时内容已变 / 写入失败的笔记）。这些不该从待处理里消失——否则它们永远不会被
+   *   补上，状态栏和「待处理笔记」弹窗也再也看不到它们。保留项的计时从「现在」重算，让它们
+   *   在静置期之后再试：旧时间戳会让 msUntilDue 立即为 0，对打开的笔记造成「再跑→再跳过」空转。
+   *
+   * 不传或传空：全部清空（这一轮确实都应用了）。手动运行（命令 / 设置页按钮）的写入也要算
+   * 进来，否则插件自己的产物会被下一轮轮询当成外部改动，白跑一轮、状态栏还一直挂着"待处理"。
    */
-  markApplied(): void {
+  markApplied(keep?: Iterable<string>): void {
     this.baseline = this.snapshot();
-    this.dirty.clear();
+    const keepSet = keep ? new Set(keep) : null;
+    const now = Date.now();
+    if (keepSet && keepSet.size > 0) {
+      for (const p of [...this.dirty.keys()]) if (!keepSet.has(p)) this.dirty.delete(p);
+      // dirty 可能已被 fire() 在运行前清空（fire 先 clear 再跑 onQuietReached），
+      // 所以这里直接 set 即可：保留项无论如何都要回到待处理里。
+      for (const p of keepSet) this.dirty.set(p, now);
+    } else {
+      this.dirty.clear();
+    }
     this.reportPending();
+  }
+
+  /** 启动看门狗（幂等）：自走的 setInterval，专门救"单发定时器不触发"这类无声故障 */
+  private startWatchdog(): void {
+    if (!this.active || this.watchdog !== null) return;
+    const pollMs = Math.max(2, this.settings.trigger.pollIntervalSec) * 1000;
+    // 检查频率略低于主链：太密会和主链抢着跑，太疏救不回来
+    const wdMs = Math.max(pollMs, 5000);
+    this.watchdog = window.setInterval(() => this.watchdogTick(), wdMs);
+  }
+
+  /**
+   * 看门狗：主链是"单发 setTimeout 链"，任何一环静默丢失整条就断了。
+   * 这里每拍自查两件事：
+   *   - 排队的检查已严重超时还没触发 → 定时器被渲染进程丢了 → 清掉重建；
+   *   - 没在跑、也没排队、却很久没 tick 过 → 链断了 → 重新排一次。
+   */
+  private watchdogTick(): void {
+    if (!this.active) return;
+    if (this.running) return; // run() 还在进行，它自己的 finally 会重新排期
+    const now = Date.now();
+    if (this.timer !== null) {
+      // 有一个检查在排队；若早就该触发却还没触发，说明它被静默丢弃了
+      if (now > this.timerDueAt + OVERDUE_SLACK_MS) {
+        this.tickError(`watch: a scheduled check was overdue by >${OVERDUE_SLACK_MS}ms; restarting`);
+        window.clearTimeout(this.timer);
+        this.timer = null;
+        this.scheduleCheck();
+      }
+      return;
+    }
+    // 没有排队、也没在跑：正常时链每 pollMs 就会排一次；很久没动说明断了
+    const pollMs = Math.max(2, this.settings.trigger.pollIntervalSec) * 1000;
+    if (now - this.lastTickAt > Math.max(pollMs * 3, OVERDUE_SLACK_MS)) {
+      this.tickError("watch: no check scheduled and no tick for a long time; restarting");
+      this.lastTickAt = now;
+      this.scheduleCheck();
+    }
   }
 
   /** 把下一次检查提前到 ms 之后；已经排得更早就不动（事件密集时不许往后挤） */
@@ -148,7 +238,7 @@ export class ChangeWatcher {
     this.timerDueAt = Date.now() + ms;
     this.timer = window.setTimeout(() => {
       this.timer = null;
-      this.tick();
+      this.safeTick();
     }, ms);
   }
 
@@ -165,13 +255,44 @@ export class ChangeWatcher {
     this.setTimer(ms);
   }
 
+  /** 定时器回调的统一入口：任何异常都只留痕、并照常续期，绝不断链 */
+  private safeTick(): void {
+    if (!this.active) return;
+    try {
+      this.tick();
+    } catch (e) {
+      console.error("[vault-linker] watch tick error", e);
+      this.tickError(String(e));
+      // 异常也不能断链：退一步按轮询间隔重排，别让"每次 tick 都抛"变成忙等
+      const pollMs = Math.max(2, this.settings.trigger.pollIntervalSec) * 1000;
+      this.setTimer(pollMs);
+    }
+  }
+
+  private tickError(message: string): void {
+    try {
+      this.events.onTickError?.(message);
+    } catch {
+      /* 留痕失败不影响自愈 */
+    }
+  }
+
   /** 一次检查：对比快照把动过的文件记进脏集，到点的就跑 */
   private tick(): void {
-    if (this.running) {
-      this.scheduleCheck();
-      return;
-    }
     if (!this.active) return;
+    // 看门狗：上一轮 run() 若卡死（await 永不返回）会把 running 卡在 true，
+    // 不处理任何变更也永远不跑——超时强制解围，让后续检查继续试。
+    if (this.running) {
+      if (this.runStartedAt > 0 && Date.now() - this.runStartedAt > RUN_STUCK_MS) {
+        console.error("[vault-linker] watch run stuck > 15min; resetting");
+        this.running = false;
+        this.runStartedAt = 0;
+      } else {
+        this.scheduleCheck();
+        return;
+      }
+    }
+    this.lastTickAt = Date.now();
     const now = Date.now();
     const snap = this.snapshot();
     const touched = touchedPaths(this.baseline, snap);
@@ -191,6 +312,7 @@ export class ChangeWatcher {
   private async fire(): Promise<void> {
     if (this.running) return;
     this.running = true;
+    this.runStartedAt = Date.now();
     try {
       // 运行期若发生**外部**改动，立即再跑一轮，否则这批改动会被下面的基线更新悄悄吸收。
       // 引擎自己写过的路径要排除，否则每次有产出都会白跑一轮。
@@ -207,10 +329,25 @@ export class ChangeWatcher {
         touch(this.dirty, external, Date.now());
         this.reportPending();
       }
+    } catch (e) {
+      console.error("[vault-linker] watch run error", e);
+      this.tickError(String(e));
     } finally {
       this.running = false;
-      this.reportPending();
+      this.runStartedAt = 0;
+      this.lastTickAt = Date.now();
+      this.safeReportPending();
+      // 关键：无论如何都要重新排下一次检查，否则整条链就断了
       this.scheduleCheck();
+    }
+  }
+
+  /** reportPending 绝不允许把异常带上 fire 的 finally（否则会波及自愈） */
+  private safeReportPending(): void {
+    try {
+      this.reportPending();
+    } catch (e) {
+      console.error("[vault-linker] watch report error", e);
     }
   }
 

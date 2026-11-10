@@ -335,6 +335,43 @@ test("ChangeWatcher：启动对账把没更新的笔记按各自 mtime 投进待
   assert.equal(watcher.pendingCount(), 0, "跑完清空待处理");
 });
 
+test("ChangeWatcher：没写成的笔记（跳过打开/写入失败）跑完后仍留在待处理，不被静默吞掉", async () => {
+  const { app } = makeApp({ "eng/a.md": "# A\n", "eng/b.md": "# B\n" });
+  const s = defaultSettings();
+  s.trigger.pollIntervalSec = 2;
+  s.trigger.quietPeriodSec = 1;
+
+  const dirty = new Map<string, number>();
+  const watcher = new ChangeWatcher(
+    app,
+    s,
+    { onPendingChange: () => {}, onQuietReached: async () => {} },
+    dirty,
+  );
+  watcher.start();
+
+  watcher.reconcile(["eng/a.md", "eng/b.md"]);
+  assert.equal(dirty.size, 2, "对账把两篇都投进待处理");
+
+  // 模拟 fire()：运行前先清空，然后这一轮 a 没写成功（正在打开）、b 写成功了
+  dirty.clear();
+  watcher.markApplied(["eng/a.md"]);
+  assert.equal(watcher.pendingCount(), 1, "没写成的 a 必须还在待处理里");
+  assert.ok(dirty.has("eng/a.md"), "a 没被清掉");
+  assert.ok(!dirty.has("eng/b.md"), "写成功的 b 被清掉");
+  // 计时从现在重算：不会因为旧时间戳立即到点而对打开的笔记空转
+  assert.ok(Math.abs((dirty.get("eng/a.md") as number) - Date.now()) < 5000, "a 的计时被重算为现在");
+
+  // 全部没写成功 → 全部保留；再传空 → 全部清空
+  dirty.clear();
+  watcher.markApplied(["eng/a.md", "eng/b.md"]);
+  assert.equal(watcher.pendingCount(), 2, "两篇都没写成 → 都留在待处理");
+  watcher.markApplied();
+  assert.equal(watcher.pendingCount(), 0, "传空 → 全部清空");
+
+  watcher.stop();
+});
+
 test("ChangeWatcher：别的笔记一直在写，不会推迟已静置笔记的到点", async () => {
   const { app, vault } = makeApp({ "eng/a.md": "# A\n" });
   const s = defaultSettings();

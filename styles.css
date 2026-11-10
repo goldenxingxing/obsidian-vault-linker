@@ -52,3 +52,39 @@
 .vault-linker-suggestion:last-of-type {
   border-bottom: none;
 }
+
+/* 状态栏入口：可点击看“待处理笔记” */
+.status-bar-item.vault-linker-status {
+  cursor: pointer;
+}
+
+.status-bar-item.vault-linker-status:hover {
+  color: var(--text-accent);
+}
+
+/* 待处理笔记列表弹窗 */
+.vault-linker-pending {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.vault-linker-pending-row {
+  padding: 5px 0;
+  border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.vault-linker-pending-row:last-child {
+  border-bottom: none;
+}
+
+.vault-linker-pending-path {
+  font-family: var(--font-monospace);
+  font-size: var(--font-ui-smaller);
+}
+
+.vault-linker-pending-meta {
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+  margin-top: 2px;
+}

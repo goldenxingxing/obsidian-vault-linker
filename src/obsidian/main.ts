@@ -16,6 +16,7 @@ import { ChangeWatcher } from "./watch.ts";
 import { deserializeQueue, serializeQueue } from "./queue.ts";
 import { LinkerSettingTab } from "./settings-tab.ts";
 import { ReportModal } from "./report-modal.ts";
+import { PendingModal, type PendingItem } from "./pending-modal.ts";
 import { EntityWizardModal } from "./wizard-modal.ts";
 
 /** rename 证据上限：够覆盖一次数千文件的大整理，又不至于无界增长 */
@@ -68,6 +69,9 @@ export default class VaultLinkerPlugin extends Plugin {
     await this.restoreQueue();
     this.addSettingTab(new LinkerSettingTab(this.app, this));
     this.statusEl = this.addStatusBarItem();
+    this.statusEl.addClass("vault-linker-status");
+    // 点状态栏直接看“待处理笔记”清单（路径 + 静置到期）
+    this.statusEl.addEventListener("click", () => this.showPending());
     this.updateStatus();
 
     if (this.firstRun) {
@@ -94,6 +98,11 @@ export default class VaultLinkerPlugin extends Plugin {
       id: "report",
       name: t("显示上次运行报告", "Show last run report"),
       callback: () => this.showReport(),
+    });
+    this.addCommand({
+      id: "pending",
+      name: t("显示待处理笔记", "Show pending notes"),
+      callback: () => this.showPending(),
     });
     this.addCommand({
       id: "entity-wizard",
@@ -185,6 +194,8 @@ export default class VaultLinkerPlugin extends Plugin {
       },
       // 返回引擎自己写过的路径，让监听层能区分“运行期外部改动”与“自己的写入”
       onQuietReached: async () => await this.run(this.settings.trigger.autoApply ? "apply" : "dry-run", false, true),
+      // 心跳/轮询内部异常留痕：不落盘的话在 Obsidian 里等于丢进黑洞，事后无法区分“没找到”和“崩了”
+      onTickError: (msg) => void this.appendLog(`\n===== ${new Date().toISOString()} watcher-ERROR =====\n${msg}\n`),
     }, this.watchDirty);
     this.watcher.start();
     this.updateStatus();
@@ -354,8 +365,13 @@ export default class VaultLinkerPlugin extends Plugin {
           10000,
         );
       }
-      // 这一轮（含手动运行）写过的内容当作已应用：待处理清零，基线跟到写完之后
-      this.watcher?.markApplied();
+      // 这一轮（含手动运行）写过的内容当作已应用，基线跟到写完之后；
+      // 但没写成的（正在打开的、写前内容已变的、写入失败的）不能跟着消失——它们得继续留在
+      // 待处理里，否则状态栏/「待处理笔记」再也看不到它们（此前正在打开的笔记会被静默吞掉、
+      // 永不补写，日志那句"关掉后下次运行补上"其实是假的）。
+      this.watcher?.markApplied(
+        outcome ? [...outcome.skippedOpen, ...outcome.skipped, ...outcome.noteFailed] : undefined,
+      );
       this.scheduleQueueSave();
       this.updateStatus();
       return outcome?.writtenPaths ?? [];
@@ -394,5 +410,19 @@ export default class VaultLinkerPlugin extends Plugin {
         void this.run("apply", true);
       },
     }).open();
+  }
+
+  /** 打开「待处理笔记」弹窗：把当前待更新集按路径+改动时刻列出来（快照，不触发运行） */
+  showPending(): void {
+    const quietMs = Math.max(1, this.settings.trigger.quietPeriodSec) * 1000;
+    const items: PendingItem[] = [...this.watchDirty.entries()]
+      .map(([path, changedAt]) => ({ path, changedAt }))
+      .sort((a, b) => a.changedAt - b.changedAt);
+    new PendingModal(
+      this.app,
+      t("Vault Linker：待处理笔记", "Vault Linker: pending notes"),
+      items,
+      quietMs,
+    ).open();
   }
 }
