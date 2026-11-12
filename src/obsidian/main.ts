@@ -3,7 +3,7 @@
  */
 
 import { setUiLocale, t } from "./i18n.ts";
-import { MarkdownView, Notice, Plugin, type TAbstractFile } from "obsidian";
+import { Notice, Plugin, type TAbstractFile } from "obsidian";
 import { obsidianLocale } from "./locale.ts";
 import {
   applyAutoTexts, defaultSettings, mergeSettings, todayIso, upgradeBuiltins, type Settings,
@@ -237,7 +237,7 @@ export default class VaultLinkerPlugin extends Plugin {
   private updateStatus(): void {
     if (!this.statusEl) return;
     const parts = ["Vault Linker Auto"];
-    parts.push(this.lastRunAt ? t(`上次 ${this.lastRunAt}`, `last run ${this.lastRunAt}`) : t("未运行", "not run yet"));
+    parts.push(this.lastRunAt ? t(`上次 ${this.lastRunAt}`, `last run ${this.lastRunAt}`) : t("空闲", "idle"));
     if (this.pendingCount > 0) parts.push(t(`待处理 ${this.pendingCount}`, `${this.pendingCount} pending`));
     this.statusEl.setText(parts.join(" · "));
   }
@@ -301,21 +301,11 @@ export default class VaultLinkerPlugin extends Plugin {
     }
   }
 
-  /** 编辑器里打开着的笔记 */
-  private openFiles(): Set<string> {
-    const out = new Set<string>();
-    for (const leaf of this.app.workspace.getLeavesOfType("markdown")) {
-      const f = leaf.view instanceof MarkdownView ? leaf.view.file : null;
-      if (f) out.add(f.path);
-    }
-    return out;
-  }
-
   /**
    * 跑一轮；返回**引擎自己写过**的路径（供监听层区分外部改动）
-   * @param auto 自动触发（监听 / 启动时）：默认跳过正在打开的笔记；手动运行则全部写。
-   * @param ctx 监听层上下文（due = 已到点路径；originals = 运行前队列快照）。自动运行时只跳过
-   *   “打开中且**未到点**”的（多半正在编辑）；打开中但已停手静置满的照写。未传时按当前队列现算。
+   * @param auto 自动触发（监听 / 启动时）：默认跳过**静置期未满**的笔记；手动运行则全部写。
+   * @param ctx 监听层上下文（due = 已到点路径；originals = 运行前队列快照）。自动运行时只写
+   *   “已到点（静置期满）”的；其余不论是否打开都跳过（保留原计时，到期后自然写入）。未传时按当前队列现算。
    */
   async run(mode: "dry-run" | "apply", notify: boolean, auto = false, ctx?: QuietCtx): Promise<readonly string[]> {
     if (this.busy) {
@@ -339,8 +329,10 @@ export default class VaultLinkerPlugin extends Plugin {
         let skipOpen: ReadonlySet<string> | undefined;
         if (auto) {
           const dueSet = (ctx?.due ?? duePaths(this.watchDirty, Date.now(), Math.max(1, s.trigger.quietPeriodSec) * 1000));
-          // 只跳过“打开中且未到点”的（很可能正在编辑）；打开中但到点了就写（vault.process 安全）
-          skipOpen = new Set([...this.openFiles()].filter((p) => !dueSet.has(p)));
+          // 静置期未满（未到点）的一律跳过——无论是否在编辑器中打开。
+          // 这样外部工具写入、Obsidian 里没打开的文件也同样等满静置期，不会被别处到点触发
+          // 的这一轮连带提前写入；被跳过的保留原计时（markApplied keep），到期后自然写入。
+          skipOpen = new Set([...plan.changedDocs].filter((p) => !dueSet.has(p)));
         }
         outcome = await applyPlanObsidian(this.app, plan, s, { skipOpen });
       }
@@ -377,7 +369,7 @@ export default class VaultLinkerPlugin extends Plugin {
       }
       // 这一轮（含手动运行）写过的内容当作已应用，基线跟到写完之后；
       // 但没写成的不能跟着消失——它们得继续留在待处理里，否则状态栏/「待处理笔记」再也看不到。
-      //   skippedOpen（打开中且未到点）：保留**原计时**（到期自然写入，不会越滑越远）；
+      //   skippedOpen（静置期未满）：保留**原计时**（到期自然写入，不会越滑越远）；
       //   skipped / noteFailed（内容已变 / 写失败）：计时重算到「现在」，静置期后再试。
       if (outcome) {
         const now = Date.now();
