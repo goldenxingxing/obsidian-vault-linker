@@ -6,7 +6,7 @@
  */
 
 import { t } from "./i18n.ts";
-import { App, Modal, Setting } from "obsidian";
+import { App, Modal, Setting, TFile } from "obsidian";
 
 export interface PendingItem {
   path: string;
@@ -60,7 +60,10 @@ export class PendingModal extends Modal {
       for (const it of this.items) {
         const due = it.changedAt + this.quietMs;
         const remain = Math.max(0, due - now);
-        const li = list.createEl("li", { cls: "vault-linker-pending-row" });
+        const li = list.createEl("li", {
+          cls: "vault-linker-pending-row is-clickable",
+          attr: { "aria-label": t("打开笔记", "Open note") },
+        });
         li.createSpan({ cls: "vault-linker-pending-path", text: it.path });
         li.createDiv({
           cls: "vault-linker-pending-meta",
@@ -69,6 +72,7 @@ export class PendingModal extends Modal {
             `changed ${fmtTs(it.mtime)} · quiet until ${fmtTs(due)} · ${fmtRemain(remain)} left`,
           ),
         });
+        li.addEventListener("click", () => this.openNote(it.path));
       }
     }
 
@@ -79,5 +83,14 @@ export class PendingModal extends Modal {
 
   override onClose(): void {
     this.contentEl.empty();
+  }
+
+  /** 点击待处理条目：在 Obsidian 里打开该笔记，并关闭弹窗 */
+  private openNote(path: string): void {
+    const file = this.app.vault.getAbstractFileByPath(path);
+    if (file instanceof TFile) {
+      void this.app.workspace.getLeaf(false).openFile(file);
+      this.close();
+    }
   }
 }
