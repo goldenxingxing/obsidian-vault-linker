@@ -204,8 +204,8 @@ async function writeVaultFile(app: AppLike, path: string, content: string): Prom
 }
 
 /**
- * @param opts.skipOpen 自动运行时**静置期未满**的笔记（自动运行时传入）：不改写。
- *   被跳过的保留原计时，到期后下一次运行补上。
+ * @param opts.skipOpen 自动运行时**不改写**的笔记（打开中且未到点、或尚无托管区块且未到点的新笔记）：
+ *   不改写。被跳过的保留原计时，到期后下一次运行补上。
  */
 export async function applyPlanObsidian(
   app: AppLike,
