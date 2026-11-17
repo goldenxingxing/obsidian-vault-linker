@@ -269,6 +269,31 @@ test("引擎端到端：生成 MOC + 互链，且二次运行 0 修改（幂等�
   assert.equal(second.out.report.mocPlanned, 0, "二次运行不应再有 MOC 改动");
 });
 
+test("只读视图数据：planRun 暴露 autolinks 与 titles（与托管区块一致）", () => {
+  const files: Record<string, string> = {
+    "eng/a.md": "# A 文档\n\n关于 API 与缓存的说明。\n",
+    "eng/b.md": "# B 文档\n\n同样讨论 API 与缓存。\n",
+    "reviews/c.md": "# C 文档\n\n与 API 无关，只谈评审流程。\n",
+  };
+  const { out } = runOnce(files, new Map(), Q);
+  // titles：每篇在范围笔记都有标题（H1 回退文件名）
+  assert.equal(out.titles.get("eng/a.md"), "A 文档");
+  assert.equal(out.titles.get("reviews/c.md"), "C 文档");
+  // autolinks：A 的相关目标里有 b（共享 API+缓存）
+  const aLinks = out.autolinks.get("eng/a.md") as string[];
+  assert.ok(aLinks.includes("eng/b.md"));
+  // 与托管区块一致：区块里写的是短目标（文件名全库唯一）+ 标题显示
+  const aBlock = out.newContents.get("eng/a.md") as string;
+  assert.match(aBlock, /\[\[b\|B 文档\]\]/);
+  // 区块里的每一条相关链接都对应 autolinks 的某个目标（显示名 = 该目标标题）
+  for (const rel of aLinks) {
+    const label = out.titles.get(rel) as string;
+    assert.ok(aBlock.includes(`|${label}]]`), `${label} 显示名应出现在 a 的区块里`);
+  }
+  // topN 生效：不超过配置上限
+  assert.ok(aLinks.length <= Q.related.topN);
+});
+
 test("opt-out 文档零改动", () => {
   const files: Record<string, string> = {
     "eng/opt.md": "---\nvault-linker: ignore\n---\n\n# 别碰我\n\nAPI 缓存\n",

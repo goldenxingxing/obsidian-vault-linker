@@ -19,6 +19,7 @@ import { LinkerSettingTab } from "./settings-tab.ts";
 import { ReportModal } from "./report-modal.ts";
 import { PendingModal, type PendingItem } from "./pending-modal.ts";
 import { EntityWizardModal } from "./wizard-modal.ts";
+import { RelatedView, RELATED_VIEW_TYPE } from "./related-view.ts";
 
 /** rename 证据上限：够覆盖一次数千文件的大整理，又不至于无界增长 */
 const MAX_RENAME_EVIDENCE = 5000;
@@ -69,6 +70,14 @@ export default class VaultLinkerPlugin extends Plugin {
     await this.loadSettings();
     await this.restoreQueue();
     this.addSettingTab(new LinkerSettingTab(this.app, this));
+    // 「相关笔记」侧边栏（只读）：命令 + 丝带图标入口；视图本身在 related-view.ts
+    this.registerView(RELATED_VIEW_TYPE, (leaf) => new RelatedView(leaf, this));
+    this.addRibbonIcon("link", t("相关笔记", "Related notes"), () => void this.openRelatedView());
+    this.addCommand({
+      id: "open-related",
+      name: t("打开相关笔记面板", "Open related notes panel"),
+      callback: () => void this.openRelatedView(),
+    });
     this.statusEl = this.addStatusBarItem();
     this.statusEl.addClass("vault-linker-status");
     // 点状态栏直接看“待处理笔记”清单（路径 + 静置到期）
@@ -160,6 +169,8 @@ export default class VaultLinkerPlugin extends Plugin {
     this.watcher?.stop();
     this.watcher = null;
     if (this.queueSaveTimer !== null) window.clearTimeout(this.queueSaveTimer);
+    // 「相关笔记」侧边栏的叶子交给 Obsidian：插件卸载时它会自动收掉（不在 onunload 里 detach，
+    // 否则会把用户手动挪过的叶子重置回默认位置）。
     // 关 vault 前把待更新集落盘：否则对账入队后秒关 vault，这批就无声丢了
     void this.saveQueue();
   }
@@ -417,6 +428,24 @@ export default class VaultLinkerPlugin extends Plugin {
     } finally {
       this.busy = false;
     }
+  }
+
+  /** 只读视图读取最近一轮计划结果（含 autolinks / titles） */
+  get latestPlan(): PlanOutput | null {
+    return this.lastPlan;
+  }
+
+  /** 打开（或聚焦）「相关笔记」侧边栏；没有就建一个，已有则切到它 */
+  async openRelatedView(): Promise<void> {
+    const { workspace } = this.app;
+    let leaf = workspace.getLeavesOfType(RELATED_VIEW_TYPE)[0];
+    if (!leaf) {
+      const right = workspace.getRightLeaf(false);
+      if (!right) return;
+      await right.setViewState({ type: RELATED_VIEW_TYPE, active: true });
+      leaf = right;
+    }
+    void workspace.revealLeaf(leaf);
   }
 
   showReport(): void {

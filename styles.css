@@ -62,6 +62,42 @@
   color: var(--text-accent);
 }
 
+/* 「相关笔记」侧边栏 */
+.vault-linker-related {
+  padding: 0 4px;
+}
+
+.vault-linker-related-heading {
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+  margin-bottom: 6px;
+  word-break: break-word;
+}
+
+.vault-linker-related-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.vault-linker-related-list li {
+  margin: 0;
+}
+
+.vault-linker-related-link {
+  display: block;
+  padding: 3px 4px;
+  border-radius: var(--radius-s);
+  color: var(--link-color);
+  text-decoration: none;
+  word-break: break-word;
+}
+
+.vault-linker-related-link:hover {
+  background: var(--background-modifier-hover);
+  text-decoration: underline;
+}
+
 /* 待处理笔记列表弹窗 */
 .vault-linker-pending {
   margin: 0;

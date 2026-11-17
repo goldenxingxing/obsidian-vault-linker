@@ -84,6 +84,10 @@ export interface PlanOutput {
   /** 全部正文的最终内容（含未变更者，供校验用） */
   newContents: Map<string, string>;
   matchers: EntityMatcher[];
+  /** 每篇在范围笔记的相关目标（已按 linkTargets 截断 topN）——供只读视图直接查，不重算 */
+  autolinks: Map<string, string[]>;
+  /** 每篇在范围笔记的标题（显示用，含别名/文件名回退）——供只读视图显示 */
+  titles: Map<string, string>;
 }
 
 /** 实体数超过它才用 EntityIndex（实测 41 个实体时逐个正则更快，681 个时慢 5 倍） */
@@ -323,6 +327,8 @@ export function* planSteps(input: EngineInput): Generator<void, PlanOutput, void
     originals,
     newContents,
     matchers,
+    autolinks,
+    titles,
   };
 }
 
